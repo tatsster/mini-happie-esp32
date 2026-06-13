@@ -33,14 +33,15 @@ Extract the PNG→RGB565 and sheet-music→melody conversion logic into a standa
 
 ### Storage Model
 
-- **D-12:** Conversion happens **once at upload time** — the server stores the resulting `.bin` file on disk and serves it directly on subsequent requests; no re-conversion per request
-- **D-13:** ESP32 efficiency: `GET /frames/{name}.bin` always returns the same pre-computed bytes unless the file was replaced; `ETag` header (from file hash or mtime) lets ESP32 skip unchanged downloads with `If-None-Match`
-- **D-14:** For web UI thumbnails (Phase 3), the server also saves the **original PNG** alongside the `.bin` — browser cannot render raw RGB565. Storage layout per frame:
+- **D-12:** Conversion happens **once at upload time** — the server stores the resulting `.bin` on disk and serves it directly on subsequent requests; no re-conversion per request
+- **D-13:** Files live **until explicitly deleted** by the user (individual delete or bulk delete). Deletion removes both files and updates the manifest; ESP32 reflects the new list on its next sync
+- **D-14:** ESP32 efficiency: `GET /frames/{name}.bin` returns the same pre-computed bytes as long as the file exists; `ETag` (from file hash or mtime) lets ESP32 skip unchanged downloads with `If-None-Match`
+- **D-15:** Storage layout per frame — two files written at upload, both deleted together:
   ```
   data/frames/{name}.bin   ← served to ESP32
-  data/frames/{name}.png   ← served as thumbnail in web UI
+  data/frames/{name}.png   ← original PNG, served as thumbnail in web UI
   ```
-- **D-15:** `convert_png()` in `converters.py` only returns the raw `.bin` bytes — the caller (Phase 2 API) is responsible for writing both files to disk
+- **D-16:** `convert_png()` in `converters.py` returns raw `.bin` bytes only — Phase 2 API writes both `.bin` and `.png` to disk; deletion removes both atomically
 
 ### Code Structure
 
