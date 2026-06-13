@@ -15,7 +15,7 @@
 
 ## Phase Details
 
-### Phase 1: Conversion Core
+### Phase 1: Conversion Core ✓ Plan 01a complete
 
 **Goal:** Extract and unit-test the PNG→RGB565 and sheet-music→melody conversion algorithms as importable Python modules, reusing the existing script logic.
 
