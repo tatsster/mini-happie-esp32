@@ -31,6 +31,17 @@ Extract the PNG→RGB565 and sheet-music→melody conversion logic into a standa
   - Output: `[{"freq": int, "ms": int}, ...]` — JSON-serializable list of note dicts
 - **D-08:** Rest notes use `{"freq": 0, "ms": N}` (matches existing `note_to_freq()` behavior for "R")
 
+### Storage Model
+
+- **D-12:** Conversion happens **once at upload time** — the server stores the resulting `.bin` file on disk and serves it directly on subsequent requests; no re-conversion per request
+- **D-13:** ESP32 efficiency: `GET /frames/{name}.bin` always returns the same pre-computed bytes unless the file was replaced; `ETag` header (from file hash or mtime) lets ESP32 skip unchanged downloads with `If-None-Match`
+- **D-14:** For web UI thumbnails (Phase 3), the server also saves the **original PNG** alongside the `.bin` — browser cannot render raw RGB565. Storage layout per frame:
+  ```
+  data/frames/{name}.bin   ← served to ESP32
+  data/frames/{name}.png   ← served as thumbnail in web UI
+  ```
+- **D-15:** `convert_png()` in `converters.py` only returns the raw `.bin` bytes — the caller (Phase 2 API) is responsible for writing both files to disk
+
 ### Code Structure
 
 - **D-09:** `server/converters.py` is a **standalone module** — copy and adapt the conversion logic from `scripts/`, no cross-folder imports
@@ -79,8 +90,10 @@ Extract the PNG→RGB565 and sheet-music→melody conversion logic into a standa
 
 ### Integration Points
 - `server/converters.py` will be imported by `server/main.py` (Phase 2) at `POST /upload/frame` and `POST /upload/song` endpoints
-- Output bytes from `convert_png()` will be written to disk as `.bin` files and served via `GET /frames/{name}.bin`
-- Output list from `convert_sheet()` will be JSON-serialized and written as `.json` files
+- At upload: Phase 2 calls `convert_png()`, writes both `data/frames/{name}.bin` (for ESP32) and saves the original PNG as `data/frames/{name}.png` (for web thumbnails)
+- `GET /frames/{name}.bin` streams the pre-stored `.bin` file — no conversion at read time
+- `GET /frames/{name}.png` (thumbnail endpoint) streams the stored original PNG
+- Output list from `convert_sheet()` will be JSON-serialized and written as `data/songs/{name}.json`
 
 </code_context>
 
