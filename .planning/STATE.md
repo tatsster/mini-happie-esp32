@@ -1,12 +1,16 @@
 ---
+gsd_state_version: 1.0
 milestone: v1.0
-name: Homelab Server
+milestone_name: milestone
 status: planning
+last_updated: "2026-06-13T07:42:03.680Z"
+last_activity: 2026-06-13 — Roadmap created, 21 requirements mapped across 4 phases
 progress:
-  phases_total: 4
-  phases_complete: 0
-  requirements_total: 21
-  requirements_complete: 0
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 ## Project Reference
