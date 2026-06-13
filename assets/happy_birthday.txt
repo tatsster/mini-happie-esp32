@@ -1,0 +1,35 @@
+# Happy Birthday - traditional, key of G, ~94 BPM
+# Run: python3 scripts/sheet_music_to_melody.py assets/happy_birthday.txt --bpm 94
+
+# "Hap-py birth-day to you"
+D4 q
+D4 e
+E4 q.
+D4 q
+G4 q
+F#4 h
+
+# "Hap-py birth-day to you"
+D4 q
+D4 e
+E4 q.
+D4 q
+A4 q
+G4 h
+
+# "Hap-py birth-day dear [name]"
+D4 q
+D4 e
+D5 q.
+B4 q
+G4 q
+F#4 q
+E4 h
+
+# "Hap-py birth-day to you"
+C5 q
+C5 e
+B4 q.
+G4 q
+A4 q
+G4 h

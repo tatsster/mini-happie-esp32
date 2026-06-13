@@ -1,0 +1,27 @@
+---
+description: Firmware conventions for main.cpp and Arduino C++ code
+globs: src/**/*.cpp, include/**/*.h
+alwaysApply: false
+---
+
+# Firmware Conventions
+
+## Images
+- Draw frames with `tft.pushImage(0, 0, CAKE_W, CAKE_H, CAKE_FRAMES[i])`
+- Always call `tft.setSwapBytes(true)` once in `setup()` — never per draw
+- Frame arrays live in `include/cake_frames.h`; add new frames there
+
+## Buzzer
+- Use `tone(PIN_BUZZER, freq, ms)` then `delay(ms)` then `noTone(PIN_BUZZER)`
+- Add `delay(30)` between notes to prevent audio glitching
+- Rest: `freq == 0` → skip `tone()`, just `delay(ms)`
+
+## Button / power
+- Prefer `INPUT_PULLUP` + active-LOW (button connects pin to GND)
+- For battery builds with power switch: remove button logic, auto-play on boot, loop or deep sleep after
+
+## Deep sleep (when used)
+```cpp
+esp_sleep_enable_ext0_wakeup(GPIO_NUM_33, 0); // wake on LOW
+esp_deep_sleep_start();
+```

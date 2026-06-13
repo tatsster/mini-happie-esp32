@@ -1,0 +1,50 @@
+---
+description: Core project context for happy-birthday-esp32
+alwaysApply: true
+---
+
+# happy-birthday-esp32 Project Context
+
+ESP32 Arduino-framework birthday gift device: animated TFT display + passive buzzer melody + button trigger.
+
+## Stack
+- **Framework**: Arduino on ESP32 (PlatformIO, not ESP-IDF)
+- **Display**: ST7735 1.8" SPI TFT 128x160 via `TFT_eSPI` library
+- **Buzzer**: passive piezo on GPIO25, driven with `tone()`
+- **Build tool**: PlatformIO (`pio run`, `pio run -t upload`)
+- **Config**: display pins and driver set via `build_flags` in `platformio.ini` — no `User_Setup.h`
+
+## Pin mapping
+| Signal | GPIO |
+|---|---|
+| TFT CS | 5 |
+| TFT DC | 16 |
+| TFT RST | 17 |
+| TFT SCK | 18 |
+| TFT MOSI | 23 |
+| Buzzer | 25 |
+| Button | 14 |
+| Boot btn | 0 |
+
+## Asset pipeline
+- PNGs must be exactly **128x160**
+- Convert: `python3 scripts/png_to_rgb565.py <in.png> <out.h> <array_name>`
+- Font: `python3 scripts/ttf_to_gfx.py <in.ttf> <out.h> <size_px>`
+- Frame registry: `include/cake_frames.h` — update when adding/removing frames
+- Always keep `tft.setSwapBytes(true)` — generated arrays are big-endian RGB565
+
+## Melody format
+```cpp
+struct Note { uint16_t freq; uint16_t ms; };
+const Note melody[] = { {freq_hz, duration_ms}, ... };
+// Use {0, ms} for rests
+```
+
+## Flash upload quirk
+This board needs manual download mode if auto-reset fails:
+hold BOOT → run upload → release BOOT when "Writing at 0x..." appears.
+
+## Power
+- DevKit VIN pin accepts 4.5–12V (onboard AMS1117 regulator → 3.3V)
+- Single 3.7V LiPo works on VIN (3.7–4.2V gives enough regulator headroom)
+- Use physical power switch on VIN/battery+ line for battery builds
