@@ -6,7 +6,8 @@ import tempfile
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
+from collections.abc import AsyncGenerator
+from typing import Annotated, Any
 
 from fastapi import FastAPI, File, HTTPException, Path as FPath, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -18,14 +19,14 @@ FRAMES_DIR = DATA_DIR / "frames"
 SONGS_DIR = DATA_DIR / "songs"
 MANIFEST_PATH = DATA_DIR / "manifest.json"
 
-EMPTY_MANIFEST: dict = {"frames": [], "songs": [], "updated_at": ""}
+EMPTY_MANIFEST: dict[str, Any] = {"frames": [], "songs": [], "updated_at": ""}
 _manifest_lock = threading.Lock()
 
 MAX_FRAME_BYTES = 1 * 1024 * 1024   # 1 MB — generous for a 128×160 PNG
 MAX_SONG_BYTES = 64 * 1024           # 64 KB — ample for a text sheet
 
 
-def _write_manifest_atomic(manifest: dict) -> None:
+def _write_manifest_atomic(manifest: dict[str, Any]) -> None:
     tmp_fd, tmp_path = tempfile.mkstemp(dir=MANIFEST_PATH.parent, suffix=".tmp")
     try:
         with os.fdopen(tmp_fd, "w") as f:
@@ -39,7 +40,7 @@ def _write_manifest_atomic(manifest: dict) -> None:
         raise
 
 
-def _read_manifest() -> dict:
+def _read_manifest() -> dict[str, Any]:
     with MANIFEST_PATH.open() as f:
         return json.load(f)
 
@@ -49,7 +50,7 @@ def _utc_now() -> str:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     FRAMES_DIR.mkdir(parents=True, exist_ok=True)
     SONGS_DIR.mkdir(parents=True, exist_ok=True)
     if not MANIFEST_PATH.exists():
@@ -61,12 +62,12 @@ app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/manifest.json")
-def get_manifest():
+def get_manifest() -> JSONResponse:
     return JSONResponse(content=_read_manifest())
 
 
 @app.post("/upload/frame", status_code=201)
-async def upload_frame(file: Annotated[UploadFile, File()]):
+async def upload_frame(file: Annotated[UploadFile, File()]) -> dict[str, str]:
     raw = await file.read(MAX_FRAME_BYTES + 1)
     if len(raw) > MAX_FRAME_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 1 MB)")
@@ -89,7 +90,7 @@ async def upload_frame(file: Annotated[UploadFile, File()]):
 
 
 @app.post("/upload/song", status_code=201)
-async def upload_song(file: Annotated[UploadFile, File()]):
+async def upload_song(file: Annotated[UploadFile, File()]) -> dict[str, str]:
     raw = await file.read(MAX_SONG_BYTES + 1)
     if len(raw) > MAX_SONG_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 64 KB)")
@@ -112,7 +113,7 @@ async def upload_song(file: Annotated[UploadFile, File()]):
 
 
 @app.get("/frames/{name}.bin")
-def get_frame_bin(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]):
+def get_frame_bin(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]) -> Response:
     path = FRAMES_DIR / f"{name}.bin"
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Frame '{name}' not found")
@@ -122,7 +123,7 @@ def get_frame_bin(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]):
 
 
 @app.get("/songs/{name}.json")
-def get_song_json(name: Annotated[str, FPath(pattern=r"^song_\d+$")]):
+def get_song_json(name: Annotated[str, FPath(pattern=r"^song_\d+$")]) -> Response:
     path = SONGS_DIR / f"{name}.json"
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Song '{name}' not found")
@@ -210,7 +211,7 @@ def _delete_song(name: str) -> None:
 
 
 @app.delete("/frames/{name}", status_code=204)
-def delete_frame(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]):
+def delete_frame(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]) -> None:
     with _manifest_lock:
         try:
             _delete_frame(name)
@@ -219,7 +220,7 @@ def delete_frame(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]):
 
 
 @app.delete("/songs/{name}", status_code=204)
-def delete_song(name: Annotated[str, FPath(pattern=r"^song_\d+$")]):
+def delete_song(name: Annotated[str, FPath(pattern=r"^song_\d+$")]) -> None:
     with _manifest_lock:
         try:
             _delete_song(name)
