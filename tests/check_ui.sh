@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Smoke-check that server/static/index.html contains all required tokens.
-# Usage: bash tests/check_ui.sh  (run from project root)
+# CWD-independent: paths are anchored to this script's own location.
 set -euo pipefail
 
-HTML="server/static/index.html"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HTML="$SCRIPT_DIR/../server/static/index.html"
 
 if [ ! -f "$HTML" ]; then
   echo "MISSING FILE: $HTML"
+  echo "Expected: $(realpath "$HTML" 2>/dev/null || echo "$HTML")"
   exit 1
 fi
 
@@ -20,7 +22,7 @@ check() {
 
 # Required tokens
 check "Birthday Device Manager"
-check "cdn.tailwindcss.com"
+check "tailwind.min.css"
 check "/upload/frame"
 check "/upload/song"
 check "/manifest.json"
