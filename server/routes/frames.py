@@ -69,6 +69,17 @@ def get_frame_bin(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]) -> Respon
     return Response(content=data, media_type="application/octet-stream", headers={"ETag": etag})
 
 
+@router.get("/frames/{name}.png")
+def get_frame_png(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]) -> Response:
+    import server.main as _main
+
+    path = _main.FRAMES_DIR / f"{name}.png"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Frame '{name}' not found")
+    data = path.read_bytes()
+    return Response(content=data, media_type="image/png")
+
+
 @router.post("/upload/frame", status_code=201)
 async def upload_frame(file: Annotated[UploadFile, File()]) -> dict[str, str]:
     import server.main as _main
