@@ -118,7 +118,7 @@ def get_frame_bin(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]):
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Frame '{name}' not found")
     data = path.read_bytes()
-    etag = f'"{hashlib.md5(data).hexdigest()}"'
+    etag = f'"{hashlib.md5(data, usedforsecurity=False).hexdigest()}"'
     return Response(content=data, media_type="application/octet-stream", headers={"ETag": etag})
 
 
@@ -128,7 +128,7 @@ def get_song_json(name: Annotated[str, FPath(pattern=r"^song_\d+$")]):
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Song '{name}' not found")
     data = path.read_bytes()
-    etag = f'"{hashlib.md5(data).hexdigest()}"'
+    etag = f'"{hashlib.md5(data, usedforsecurity=False).hexdigest()}"'
     return Response(content=data, media_type="application/json", headers={"ETag": etag})
 
 
