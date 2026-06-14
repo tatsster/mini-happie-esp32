@@ -1,8 +1,14 @@
 import io
 import re
 import struct
+from typing import TypedDict
 
 from PIL import Image
+
+class Note(TypedDict):
+    freq: int
+    ms: int
+
 
 SEMITONES = {
     "C": 0, "C#": 1, "DB": 1,
@@ -70,7 +76,7 @@ def _beats_to_ms(beats: float, bpm: float) -> int:
     return round((beats / bpm) * 60_000)
 
 
-def convert_sheet(text: str, bpm: float = 120.0) -> list[dict]:
+def convert_sheet(text: str, bpm: float = 120.0) -> list[Note]:
     result = []
     for lineno, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
@@ -85,5 +91,5 @@ def convert_sheet(text: str, bpm: float = 120.0) -> list[dict]:
             raise ValueError(f"Line {lineno}: unknown duration '{dur_str}'")
         freq = _note_to_freq(note_str)
         ms = _beats_to_ms(DURATION_BEATS[dur_str], bpm)
-        result.append({"freq": freq, "ms": ms})
+        result.append(Note(freq=freq, ms=ms))
     return result
