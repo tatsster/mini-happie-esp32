@@ -38,11 +38,11 @@ Implement all REST API endpoints (`API-01` through `API-08`) with file storage a
 
 ### Carried Forward from Phase 1
 
-- **D-10:** Storage layout: `data/frames/frame_N.bin`, `data/frames/frame_N.png`, `data/songs/song_N.json`
-- **D-11:** Convert once at upload time; serve pre-stored bytes on read. No re-conversion per request.
-- **D-12:** Files live until explicitly deleted via `DELETE /frames/{name}` or `DELETE /songs/{name}`
-- **D-13:** Manifest format: `{ "frames": ["frame_0.bin", ...], "songs": ["song_0.json", ...], "updated_at": "ISO8601" }`
-- **D-14:** Frame binary: raw big-endian uint16_t RGB565, exactly 40960 bytes (128×160×2)
+- **D-10 [informational]:** Storage layout: `data/frames/frame_N.bin`, `data/frames/frame_N.png`, `data/songs/song_N.json`
+- **D-11 [informational]:** Convert once at upload time; serve pre-stored bytes on read. No re-conversion per request.
+- **D-12 [informational]:** Files live until explicitly deleted via `DELETE /frames/{name}` or `DELETE /songs/{name}`
+- **D-13 [informational]:** Manifest format: `{ "frames": ["frame_0.bin", ...], "songs": ["song_0.json", ...], "updated_at": "ISO8601" }`
+- **D-14 [informational]:** Frame binary: raw big-endian uint16_t RGB565, exactly 40960 bytes (128×160×2)
 
 ### Claude's Discretion
 

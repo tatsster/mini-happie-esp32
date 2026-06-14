@@ -42,9 +42,13 @@
 **Goal:** Implement all REST API endpoints with file storage and manifest management using FastAPI.
 
 **Plans:** 2 plans
-
 Plans:
+**Wave 1**
+
 - [ ] 02-01-PLAN.md — FastAPI app core, manifest persistence, GET /manifest.json + upload endpoints (Wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 02-02-PLAN.md — Serve (ETag) + delete (reorder) endpoints + full integration test suite (Wave 2)
 
 **Requirements:**
