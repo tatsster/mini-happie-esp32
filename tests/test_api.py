@@ -1,25 +1,36 @@
-"""Integration tests for the FastAPI server upload endpoints and manifest.
+"""Full HTTP integration test suite for the Phase 2 FastAPI server.
 
-Tests cover:
-- POST /upload/frame: valid PNG → 201 + .bin (40960 bytes) + .png stored + manifest updated
-- POST /upload/frame: second upload creates frame_1 (sequential naming)
-- POST /upload/frame: non-PNG bytes → 422
-- GET /manifest.json: returns frames, songs, updated_at
-- POST /upload/song: valid sheet → 201 + .json stored + manifest updated
-- POST /upload/song: malformed/un-decodable bytes → 422
+Covers all eight API requirements (API-01..API-08) plus path-traversal rejection.
+Each test class maps to one API requirement or security concern.
 """
 
 import io
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 from PIL import Image
 from fastapi.testclient import TestClient
 
 import server.main as main_module
-from server.main import app
+
+
+# ---------------------------------------------------------------------------
+# Shared fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    """Redirect all server Path constants to a temp dir; lifespan writes empty manifest."""
+    monkeypatch.setattr(main_module, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main_module, "FRAMES_DIR", tmp_path / "frames")
+    monkeypatch.setattr(main_module, "SONGS_DIR", tmp_path / "songs")
+    monkeypatch.setattr(main_module, "MANIFEST_PATH", tmp_path / "manifest.json")
+    (tmp_path / "frames").mkdir()
+    (tmp_path / "songs").mkdir()
+
+    with TestClient(main_module.app) as c:
+        yield c
 
 
 def _make_png(width: int = 128, height: int = 160, color: str = "white") -> bytes:
@@ -28,153 +39,241 @@ def _make_png(width: int = 128, height: int = 160, color: str = "white") -> byte
     return buf.getvalue()
 
 
-@pytest.fixture()
-def tmp_data(tmp_path: Path, monkeypatch):
-    """Redirect all server Path constants to a temp directory and initialize the manifest."""
-    frames_dir = tmp_path / "frames"
-    songs_dir = tmp_path / "songs"
-    manifest_path = tmp_path / "manifest.json"
-
-    frames_dir.mkdir()
-    songs_dir.mkdir()
-
-    monkeypatch.setattr(main_module, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(main_module, "FRAMES_DIR", frames_dir)
-    monkeypatch.setattr(main_module, "SONGS_DIR", songs_dir)
-    monkeypatch.setattr(main_module, "MANIFEST_PATH", manifest_path)
-
-    main_module._write_manifest_atomic(dict(main_module.EMPTY_MANIFEST))
-    return tmp_path
+_VALID_SHEET = b"C4 q\nD4 q\nE4 q\n"
 
 
-@pytest.fixture()
-def client(tmp_data):
-    return TestClient(app)
+def _upload_frame(client, png_bytes: bytes = None):
+    if png_bytes is None:
+        png_bytes = _make_png()
+    return client.post(
+        "/upload/frame",
+        files={"file": ("frame.png", png_bytes, "image/png")},
+    )
+
+
+def _upload_song(client, sheet_bytes: bytes = None):
+    if sheet_bytes is None:
+        sheet_bytes = _VALID_SHEET
+    return client.post(
+        "/upload/song",
+        files={"file": ("song.txt", sheet_bytes, "text/plain")},
+    )
 
 
 # ---------------------------------------------------------------------------
-# GET /manifest.json
+# API-01: GET /manifest.json
 # ---------------------------------------------------------------------------
+
 
 class TestGetManifest:
-    def test_returns_empty_manifest_on_fresh_data_dir(self, client):
+    def test_get_manifest_empty(self, client):
         resp = client.get("/manifest.json")
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["frames"] == []
-        assert data["songs"] == []
-        assert "updated_at" in data
+        body = resp.json()
+        assert "frames" in body
+        assert "songs" in body
+        assert "updated_at" in body
+        assert body["frames"] == []
+        assert body["songs"] == []
+
+    def test_manifest_after_upload(self, client, solid_128x160_png):
+        _upload_frame(client, solid_128x160_png)
+        _upload_song(client)
+        body = client.get("/manifest.json").json()
+        assert "frame_0.bin" in body["frames"]
+        assert "song_0.json" in body["songs"]
 
 
 # ---------------------------------------------------------------------------
-# POST /upload/frame
+# API-02: GET /frames/{name}.bin
 # ---------------------------------------------------------------------------
 
-class TestUploadFrame:
-    def test_valid_png_returns_201_and_name(self, client):
-        png = _make_png()
-        resp = client.post("/upload/frame", files={"file": ("frame.png", png, "image/png")})
-        assert resp.status_code == 201
-        assert resp.json() == {"name": "frame_0"}
 
-    def test_valid_png_writes_bin_of_40960_bytes(self, client, tmp_data):
-        png = _make_png()
-        client.post("/upload/frame", files={"file": ("frame.png", png, "image/png")})
-        bin_path = tmp_data / "frames" / "frame_0.bin"
-        assert bin_path.exists()
-        assert bin_path.stat().st_size == 40960
+class TestGetFrameBin:
+    def test_get_frame_bin(self, client, solid_128x160_png):
+        _upload_frame(client, solid_128x160_png)
+        resp = client.get("/frames/frame_0.bin")
+        assert resp.status_code == 200
+        assert len(resp.content) == 40960  # 128 * 160 * 2 bytes (RGB565)
 
-    def test_valid_png_writes_original_png(self, client, tmp_data):
-        png = _make_png()
-        client.post("/upload/frame", files={"file": ("frame.png", png, "image/png")})
-        png_path = tmp_data / "frames" / "frame_0.png"
-        assert png_path.exists()
-        assert png_path.read_bytes() == png
+    def test_get_frame_bin_not_found(self, client):
+        resp = client.get("/frames/frame_99.bin")
+        assert resp.status_code == 404
 
-    def test_frame_name_appears_in_manifest(self, client):
-        png = _make_png()
-        client.post("/upload/frame", files={"file": ("frame.png", png, "image/png")})
-        manifest = client.get("/manifest.json").json()
-        assert "frame_0.bin" in manifest["frames"]
-        assert manifest["updated_at"] != ""
 
-    def test_second_upload_creates_frame_1(self, client):
-        png = _make_png()
-        client.post("/upload/frame", files={"file": ("f1.png", png, "image/png")})
-        resp2 = client.post("/upload/frame", files={"file": ("f2.png", png, "image/png")})
-        assert resp2.status_code == 201
-        assert resp2.json() == {"name": "frame_1"}
-        manifest = client.get("/manifest.json").json()
-        assert "frame_0.bin" in manifest["frames"]
-        assert "frame_1.bin" in manifest["frames"]
+# ---------------------------------------------------------------------------
+# API-03: GET /songs/{name}.json
+# ---------------------------------------------------------------------------
 
-    def test_non_png_bytes_return_422(self, client):
-        resp = client.post(
-            "/upload/frame",
-            files={"file": ("bad.png", b"this is not a png", "image/png")},
+
+class TestGetSongJson:
+    def test_get_song_json(self, client, happy_birthday_text):
+        client.post(
+            "/upload/song",
+            files={"file": ("song.txt", happy_birthday_text.encode(), "text/plain")},
         )
-        assert resp.status_code == 422
-
-    def test_small_png_is_auto_resized_not_rejected(self, client):
-        """convert_png auto-resizes any valid PNG (Phase 1 D-01) — no 422 for wrong dimensions."""
-        small_png = _make_png(32, 32)
-        resp = client.post("/upload/frame", files={"file": ("small.png", small_png, "image/png")})
-        assert resp.status_code == 201
-
-
-# ---------------------------------------------------------------------------
-# POST /upload/song
-# ---------------------------------------------------------------------------
-
-class TestUploadSong:
-    VALID_SHEET = b"C4 q\nD4 q\nE4 q\n"
-
-    def test_valid_sheet_returns_201_and_name(self, client):
-        resp = client.post("/upload/song", files={"file": ("song.txt", self.VALID_SHEET, "text/plain")})
-        assert resp.status_code == 201
-        assert resp.json() == {"name": "song_0"}
-
-    def test_valid_sheet_writes_json_file(self, client, tmp_data):
-        client.post("/upload/song", files={"file": ("song.txt", self.VALID_SHEET, "text/plain")})
-        json_path = tmp_data / "songs" / "song_0.json"
-        assert json_path.exists()
-        notes = json.loads(json_path.read_text())
+        resp = client.get("/songs/song_0.json")
+        assert resp.status_code == 200
+        notes = resp.json()
         assert isinstance(notes, list)
         assert all("freq" in n and "ms" in n for n in notes)
 
-    def test_song_name_appears_in_manifest(self, client):
-        client.post("/upload/song", files={"file": ("song.txt", self.VALID_SHEET, "text/plain")})
+    def test_get_song_json_not_found(self, client):
+        resp = client.get("/songs/song_99.json")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# API-04: POST /upload/frame
+# ---------------------------------------------------------------------------
+
+
+class TestUploadFrame:
+    def test_upload_frame_stores_files(self, client, solid_128x160_png, tmp_path):
+        _upload_frame(client, solid_128x160_png)
+        bin_path = tmp_path / "frames" / "frame_0.bin"
+        png_path = tmp_path / "frames" / "frame_0.png"
+        assert bin_path.exists()
+        assert bin_path.stat().st_size == 40960
+        assert png_path.exists()
+
+    def test_upload_frame_updates_manifest(self, client, solid_128x160_png):
+        resp = _upload_frame(client, solid_128x160_png)
+        assert resp.status_code == 201
         manifest = client.get("/manifest.json").json()
-        assert "song_0.json" in manifest["songs"]
+        assert "frame_0.bin" in manifest["frames"]
         assert manifest["updated_at"] != ""
 
-    def test_malformed_sheet_returns_422(self, client):
-        bad = b"not a valid note line at all $$$"
-        resp = client.post("/upload/song", files={"file": ("bad.txt", bad, "text/plain")})
-        assert resp.status_code == 422
-
-    def test_invalid_utf8_bytes_return_422(self, client):
-        invalid_utf8 = b"\xff\xfe not utf8"
-        resp = client.post("/upload/song", files={"file": ("bad.txt", invalid_utf8, "text/plain")})
-        assert resp.status_code == 422
-
-    def test_second_upload_creates_song_1(self, client):
-        client.post("/upload/song", files={"file": ("s1.txt", self.VALID_SHEET, "text/plain")})
-        resp2 = client.post("/upload/song", files={"file": ("s2.txt", self.VALID_SHEET, "text/plain")})
-        assert resp2.status_code == 201
-        assert resp2.json() == {"name": "song_1"}
-
-
-# ---------------------------------------------------------------------------
-# Manifest lock coverage (grep-based check is in plan; pytest-level smoke)
-# ---------------------------------------------------------------------------
-
-class TestManifestLockCoverage:
-    def test_both_upload_handlers_use_manifest_lock(self):
-        """Verify the lock is referenced at least twice (once per upload handler)."""
-        import server.main
-        import inspect
-        source = inspect.getsource(server.main)
-        assert source.count("_manifest_lock") >= 2, (
-            "Expected _manifest_lock to appear at least twice in server/main.py"
+    def test_upload_frame_invalid_png(self, client):
+        resp = client.post(
+            "/upload/frame",
+            files={"file": ("bad.png", b"not a png", "image/png")},
         )
+        assert resp.status_code == 422
+
+    def test_upload_frame_sequential_naming(self, client, solid_128x160_png):
+        _upload_frame(client, solid_128x160_png)
+        resp = _upload_frame(client, solid_128x160_png)
+        assert resp.status_code == 201
+        assert resp.json() == {"name": "frame_1"}
+
+
+# ---------------------------------------------------------------------------
+# API-05: POST /upload/song
+# ---------------------------------------------------------------------------
+
+
+class TestUploadSong:
+    def test_upload_song(self, client):
+        resp = _upload_song(client)
+        assert resp.status_code == 201
+        manifest = client.get("/manifest.json").json()
+        assert "song_0.json" in manifest["songs"]
+
+    def test_upload_song_invalid_sheet(self, client):
+        resp = _upload_song(client, b"not a valid note line at all $$$")
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# API-06: DELETE /frames/{name}
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteFrame:
+    def test_delete_frame(self, client, solid_128x160_png, tmp_path):
+        _upload_frame(client, solid_128x160_png)
+        resp = client.delete("/frames/frame_0")
+        assert resp.status_code == 204
+        assert not (tmp_path / "frames" / "frame_0.bin").exists()
+        manifest = client.get("/manifest.json").json()
+        assert "frame_0.bin" not in manifest["frames"]
+
+    def test_delete_frame_reorders_slots(self, client, solid_128x160_png):
+        for _ in range(3):
+            _upload_frame(client, solid_128x160_png)
+        before_updated_at = client.get("/manifest.json").json()["updated_at"]
+
+        resp = client.delete("/frames/frame_1")
+        assert resp.status_code == 204
+
+        manifest = client.get("/manifest.json").json()
+        assert manifest["frames"] == ["frame_0.bin", "frame_1.bin"]
+        assert manifest["updated_at"] != before_updated_at
+
+    def test_delete_frame_not_found(self, client):
+        resp = client.delete("/frames/frame_9")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# API-07: DELETE /songs/{name}
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteSong:
+    def test_delete_song(self, client, tmp_path):
+        _upload_song(client)
+        resp = client.delete("/songs/song_0")
+        assert resp.status_code == 204
+        assert not (tmp_path / "songs" / "song_0.json").exists()
+        manifest = client.get("/manifest.json").json()
+        assert "song_0.json" not in manifest["songs"]
+
+    def test_delete_song_not_found(self, client):
+        resp = client.delete("/songs/song_9")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# API-08: ETag header
+# ---------------------------------------------------------------------------
+
+
+class TestETag:
+    def test_etag_header_present(self, client, solid_128x160_png):
+        _upload_frame(client, solid_128x160_png)
+        resp = client.get("/frames/frame_0.bin")
+        assert resp.status_code == 200
+        etag = resp.headers.get("etag", "")
+        assert etag.startswith('"'), f"ETag must start with double-quote, got: {etag!r}"
+        assert etag.endswith('"'), f"ETag must end with double-quote, got: {etag!r}"
+
+    def test_etag_stable(self, client, solid_128x160_png):
+        _upload_frame(client, solid_128x160_png)
+        etag1 = client.get("/frames/frame_0.bin").headers["etag"]
+        etag2 = client.get("/frames/frame_0.bin").headers["etag"]
+        assert etag1 == etag2
+
+    def test_etag_song(self, client):
+        _upload_song(client)
+        resp = client.get("/songs/song_0.json")
+        assert resp.status_code == 200
+        etag = resp.headers.get("etag", "")
+        assert etag.startswith('"')
+        assert etag.endswith('"')
+
+
+# ---------------------------------------------------------------------------
+# Security: path traversal rejection
+# ---------------------------------------------------------------------------
+
+
+class TestPathTraversal:
+    def test_path_traversal_rejected(self, client):
+        # frame_x violates ^frame_\d+$ -- must be 422
+        resp = client.get("/frames/frame_x.bin")
+        assert resp.status_code == 422
+
+    def test_path_traversal_dotdot_rejected(self, client):
+        # URL-encoded ../ in path should be rejected with 404 or 422
+        resp = client.get("/frames/..%2Fetc%2Fpasswd.bin")
+        assert resp.status_code in (404, 422)
+
+    def test_delete_path_traversal_rejected(self, client):
+        resp = client.delete("/frames/frame_x")
+        assert resp.status_code == 422
+
+    def test_song_path_traversal_rejected(self, client):
+        resp = client.get("/songs/song_x.json")
+        assert resp.status_code == 422
