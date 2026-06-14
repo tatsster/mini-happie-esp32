@@ -295,3 +295,16 @@ class TestPathTraversal:
     def test_song_path_traversal_rejected(self, client):
         resp = client.get("/songs/song_x.json")
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Static serving: GET /
+# ---------------------------------------------------------------------------
+
+
+class TestStaticServing:
+    def test_get_root_returns_html(self, client):
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert b"<html" in resp.content.lower()
