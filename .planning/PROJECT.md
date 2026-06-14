@@ -16,15 +16,17 @@ The device delights the recipient by playing a personalized birthday experience 
 - ✓ Passive buzzer plays Happy Birthday melody via `tone()` — v0 baseline
 - ✓ Button-triggered playback sequence — v0 baseline
 - ✓ Sheet music parser script (`scripts/sheet_music_to_melody.py`) converts text notation to C array — v0 baseline
+- ✓ PNG→RGB565 and sheet-music→melody conversion modules (`server/converters.py`) — Validated in Phase 1: Conversion Core
+- ✓ REST API endpoints for frame/song upload, serve, delete, and manifest — Validated in Phase 2: FastAPI Server
 
 ### Active
 
 **Milestone v1.0 — Homelab Server:**
-- [ ] User can upload a PNG image and it is converted to RGB565 binary for ESP32
-- [ ] User can upload a song sheet and it is converted to melody data for ESP32
+- [x] User can upload a PNG image and it is converted to RGB565 binary for ESP32 (Phase 1 + Phase 2)
+- [x] User can upload a song sheet and it is converted to melody data for ESP32 (Phase 1 + Phase 2)
 - [ ] User can manage (preview, delete) uploaded frames via web UI
-- [ ] ESP32 can fetch a manifest listing available images and songs
-- [ ] ESP32 can download individual frame binaries and song data via HTTP
+- [x] ESP32 can fetch a manifest listing available images and songs (Phase 2)
+- [x] ESP32 can download individual frame binaries and song data via HTTP (Phase 2)
 - [ ] Server is containerized and self-hostable via docker-compose
 
 **Planned v1.1 — ESP32 WiFi + OTA:**
@@ -95,4 +97,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-13 — Phase 1 complete: server/converters.py module with convert_png + convert_sheet, 23 tests passing*
+*Last updated: 2026-06-14 — Phase 2 complete: FastAPI server with all REST endpoints, 47 tests passing*
