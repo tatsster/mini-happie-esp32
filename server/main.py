@@ -62,8 +62,7 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/manifest.json")
 def get_manifest():
-    data = json.loads(MANIFEST_PATH.read_text())
-    return JSONResponse(content=data)
+    return JSONResponse(content=_read_manifest())
 
 
 @app.post("/upload/frame", status_code=201)
