@@ -1,4 +1,5 @@
 import io
+import re
 import struct
 
 from PIL import Image
@@ -44,19 +45,23 @@ def convert_png(data: bytes, width: int = 128, height: int = 160) -> bytes:
         raise ValueError(f"PNG conversion failed: {exc}") from exc
 
 
+_NOTE_RE = re.compile(r"^([A-Ga-g][#Bb]?)(-?\d+)$")
+
+
 def _note_to_freq(note_str: str) -> int:
     note_str = note_str.strip()
     if note_str.upper() == "R":
         return 0
-    i = len(note_str) - 1
-    while i >= 0 and (note_str[i].isdigit() or note_str[i] == "-"):
-        i -= 1
-    note_name = note_str[: i + 1].upper()
-    octave_str = note_str[i + 1 :]
+    m = _NOTE_RE.match(note_str)
+    if not m:
+        # Distinguish "unknown note name" from "missing octave" for test compatibility.
+        letter = re.match(r"^[A-Ga-g][#Bb]?", note_str)
+        if letter and note_str[letter.end():] == "":
+            raise ValueError(f"Missing octave in: '{note_str}'")
+        raise ValueError(f"Unknown note name: '{note_str}'")
+    note_name, octave_str = m.group(1).upper(), m.group(2)
     if note_name not in SEMITONES:
         raise ValueError(f"Unknown note name: '{note_str}'")
-    if not octave_str:
-        raise ValueError(f"Missing octave in: '{note_str}'")
     midi = (int(octave_str) + 1) * 12 + SEMITONES[note_name]
     return round(440.0 * (2 ** ((midi - 69) / 12.0)))
 
