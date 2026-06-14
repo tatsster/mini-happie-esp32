@@ -144,9 +144,29 @@ def _delete_frame(name: str) -> None:
     (FRAMES_DIR / f"{name}.bin").unlink(missing_ok=True)
     (FRAMES_DIR / f"{name}.png").unlink(missing_ok=True)
 
-    for i in range(idx + 1, total):
-        (FRAMES_DIR / f"frame_{i}.bin").rename(FRAMES_DIR / f"frame_{i - 1}.bin")
-        (FRAMES_DIR / f"frame_{i}.png").rename(FRAMES_DIR / f"frame_{i - 1}.png")
+    # Build the full rename plan before executing any rename so that a
+    # partial failure mid-loop can be rolled back without leaving the
+    # filesystem inconsistent with the manifest.
+    plan = [
+        (FRAMES_DIR / f"frame_{i}.bin", FRAMES_DIR / f"frame_{i - 1}.bin")
+        for i in range(idx + 1, total)
+    ] + [
+        (FRAMES_DIR / f"frame_{i}.png", FRAMES_DIR / f"frame_{i - 1}.png")
+        for i in range(idx + 1, total)
+    ]
+
+    completed: list[tuple[Path, Path]] = []
+    try:
+        for src, dst in plan:
+            src.rename(dst)
+            completed.append((dst, src))
+    except OSError:
+        for dst, src in reversed(completed):
+            try:
+                dst.rename(src)
+            except OSError:
+                pass
+        raise
 
     manifest["frames"] = [f"frame_{i}.bin" for i in range(total - 1)]
     manifest["updated_at"] = _utc_now()
@@ -164,8 +184,26 @@ def _delete_song(name: str) -> None:
 
     (SONGS_DIR / f"{name}.json").unlink(missing_ok=True)
 
-    for i in range(idx + 1, total):
-        (SONGS_DIR / f"song_{i}.json").rename(SONGS_DIR / f"song_{i - 1}.json")
+    # Build the full rename plan before executing any rename so that a
+    # partial failure mid-loop can be rolled back without leaving the
+    # filesystem inconsistent with the manifest.
+    plan = [
+        (SONGS_DIR / f"song_{i}.json", SONGS_DIR / f"song_{i - 1}.json")
+        for i in range(idx + 1, total)
+    ]
+
+    completed: list[tuple[Path, Path]] = []
+    try:
+        for src, dst in plan:
+            src.rename(dst)
+            completed.append((dst, src))
+    except OSError:
+        for dst, src in reversed(completed):
+            try:
+                dst.rename(src)
+            except OSError:
+                pass
+        raise
 
     manifest["songs"] = [f"song_{i}.json" for i in range(total - 1)]
     manifest["updated_at"] = _utc_now()
