@@ -29,7 +29,10 @@ def _write_manifest_atomic(manifest: dict) -> None:
             json.dump(manifest, f, indent=2)
         os.replace(tmp_path, MANIFEST_PATH)
     except Exception:
-        os.unlink(tmp_path)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
         raise
 
 
