@@ -9,7 +9,7 @@
 | # | Phase | Goal | Requirements | Est. Effort |
 |---|-------|------|--------------|-------------|
 | 1 | Conversion Core | 2/2 | Complete    | 2026-06-13 |
-| 2 | FastAPI Server | 1/2 | In Progress|  |
+| 2 | FastAPI Server | 2/2 | Complete   | 2026-06-14 |
 | 3 | Web UI | Upload forms, thumbnail previews, delete actions, and error display | UI-01, UI-02, UI-03, UI-04, UI-05, UI-06 | 2–3h |
 | 4 | Docker Packaging | Dockerfile, docker-compose, volume mounts, and env configuration | DEPLOY-01, DEPLOY-02, DEPLOY-03 | 1–2h |
 
@@ -41,7 +41,7 @@
 
 **Goal:** Implement all REST API endpoints with file storage and manifest management using FastAPI.
 
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 **Wave 1**
 
@@ -49,7 +49,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-02-PLAN.md — Serve (ETag) + delete (reorder) endpoints + full integration test suite (Wave 2)
+- [x] 02-02-PLAN.md — Serve (ETag) + delete (reorder) endpoints + full integration test suite (Wave 2)
 
 **Requirements:**
 
