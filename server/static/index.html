@@ -1,10 +1,336 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Birthday Device Manager</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Birthday Device Manager</title>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-    <h1>Birthday Device Manager</h1>
+<body class="bg-white font-sans">
+
+  <!-- Page header -->
+  <header class="bg-gray-100 border-b border-gray-200 px-8 py-4">
+    <h1 class="text-2xl font-semibold text-gray-800 leading-tight">Birthday Device Manager</h1>
+  </header>
+
+  <!-- Main content -->
+  <div class="max-w-5xl mx-auto px-8 py-12">
+    <div class="grid grid-cols-2 gap-8">
+
+      <!-- Frames column -->
+      <section class="bg-gray-100 rounded-lg border border-gray-200 p-6 flex flex-col gap-4">
+        <h2 class="text-xl font-semibold text-gray-800">Frames</h2>
+
+        <!-- Upload zone -->
+        <label id="frame-label"
+               class="block border-2 border-dashed border-gray-300 rounded-md py-8 px-4 text-center cursor-pointer hover:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2">
+          <!-- Idle state -->
+          <span id="frame-idle">
+            <span class="block text-sm font-semibold text-gray-700 leading-snug">Choose a PNG file</span>
+            <span class="block text-sm text-gray-500 leading-normal">128 × 160 pixels required</span>
+          </span>
+          <!-- Loading state (hidden by default) -->
+          <span id="frame-loading" class="hidden items-center justify-center gap-2">
+            <svg class="animate-spin h-5 w-5 text-blue-500 inline-block"
+                 xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10"
+                      stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <span class="text-sm text-gray-700">Uploading&#8230;</span>
+          </span>
+          <input id="frame-input" type="file" accept=".png,image/png" class="sr-only">
+        </label>
+
+        <!-- Error area -->
+        <p id="frame-error" class="text-sm text-red-500 mt-1 hidden"></p>
+
+        <!-- List -->
+        <ul id="frame-list" class="flex flex-col divide-y divide-gray-200">
+          <!-- Rows rendered by JS -->
+        </ul>
+      </section>
+
+      <!-- Songs column -->
+      <section class="bg-gray-100 rounded-lg border border-gray-200 p-6 flex flex-col gap-4">
+        <h2 class="text-xl font-semibold text-gray-800">Songs</h2>
+
+        <!-- Upload zone -->
+        <label id="song-label"
+               class="block border-2 border-dashed border-gray-300 rounded-md py-8 px-4 text-center cursor-pointer hover:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2">
+          <!-- Idle state -->
+          <span id="song-idle">
+            <span class="block text-sm font-semibold text-gray-700 leading-snug">Choose a song sheet</span>
+            <span class="block text-sm text-gray-500 leading-normal">Plain text (.txt)</span>
+          </span>
+          <!-- Loading state (hidden by default) -->
+          <span id="song-loading" class="hidden items-center justify-center gap-2">
+            <svg class="animate-spin h-5 w-5 text-blue-500 inline-block"
+                 xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10"
+                      stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <span class="text-sm text-gray-700">Uploading&#8230;</span>
+          </span>
+          <input id="song-input" type="file" accept=".txt,text/plain" class="sr-only">
+        </label>
+
+        <!-- Error area -->
+        <p id="song-error" class="text-sm text-red-500 mt-1 hidden"></p>
+
+        <!-- List -->
+        <ul id="song-list" class="flex flex-col divide-y divide-gray-200">
+          <!-- Rows rendered by JS -->
+        </ul>
+      </section>
+
+    </div>
+  </div>
+
+  <script>
+    // -----------------------------------------------------------------------
+    // DOM references
+    // -----------------------------------------------------------------------
+    const frameInput   = document.getElementById("frame-input");
+    const frameLabel   = document.getElementById("frame-label");
+    const frameIdle    = document.getElementById("frame-idle");
+    const frameLoading = document.getElementById("frame-loading");
+    const frameError   = document.getElementById("frame-error");
+    const frameList    = document.getElementById("frame-list");
+
+    const songInput    = document.getElementById("song-input");
+    const songLabel    = document.getElementById("song-label");
+    const songIdle     = document.getElementById("song-idle");
+    const songLoading  = document.getElementById("song-loading");
+    const songError    = document.getElementById("song-error");
+    const songList     = document.getElementById("song-list");
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    /** Strip the last extension from a filename: "frame_0.bin" -> "frame_0" */
+    function slotName(filename) {
+      return filename.replace(/\.[^.]+$/, "");
+    }
+
+    function setFrameLoading(on) {
+      if (on) {
+        frameIdle.classList.add("hidden");
+        frameLoading.classList.remove("hidden");
+        frameLoading.classList.add("flex");
+        frameLabel.classList.add("pointer-events-none", "opacity-60");
+      } else {
+        frameIdle.classList.remove("hidden");
+        frameLoading.classList.add("hidden");
+        frameLoading.classList.remove("flex");
+        frameLabel.classList.remove("pointer-events-none", "opacity-60");
+      }
+    }
+
+    function setSongLoading(on) {
+      if (on) {
+        songIdle.classList.add("hidden");
+        songLoading.classList.remove("hidden");
+        songLoading.classList.add("flex");
+        songLabel.classList.add("pointer-events-none", "opacity-60");
+      } else {
+        songIdle.classList.remove("hidden");
+        songLoading.classList.add("hidden");
+        songLoading.classList.remove("flex");
+        songLabel.classList.remove("pointer-events-none", "opacity-60");
+      }
+    }
+
+    function showFrameError(msg) {
+      frameError.textContent = msg;
+      frameError.classList.remove("hidden");
+    }
+
+    function clearFrameError() {
+      frameError.textContent = "";
+      frameError.classList.add("hidden");
+    }
+
+    function showSongError(msg) {
+      songError.textContent = msg;
+      songError.classList.remove("hidden");
+    }
+
+    function clearSongError() {
+      songError.textContent = "";
+      songError.classList.add("hidden");
+    }
+
+    // -----------------------------------------------------------------------
+    // Manifest fetch + list rendering
+    // -----------------------------------------------------------------------
+
+    async function refreshManifest() {
+      const resp = await fetch("/manifest.json");
+      const data = await resp.json();
+      renderFrameList(data.frames || []);
+      renderSongList(data.songs || []);
+    }
+
+    function clearChildren(el) {
+      while (el.firstChild) { el.removeChild(el.firstChild); }
+    }
+
+    function renderFrameList(frames) {
+      clearChildren(frameList);
+      if (frames.length === 0) {
+        const p = document.createElement("p");
+        p.className = "text-sm text-gray-500 text-center py-4";
+        p.textContent = "No frames uploaded";
+        const sub = document.createElement("span");
+        sub.className = "block text-sm text-gray-500 leading-normal";
+        sub.textContent = "Upload a 128\xD7160 PNG to get started.";
+        p.appendChild(sub);
+        frameList.appendChild(p);
+        return;
+      }
+      frames.forEach(function(filename) {
+        const name = slotName(filename);
+        const li = document.createElement("li");
+        li.className = "flex items-center justify-between py-2";
+
+        const span = document.createElement("span");
+        span.className = "text-sm text-gray-700";
+        span.textContent = name;
+
+        const btn = document.createElement("button");
+        btn.className = "text-sm text-red-500 hover:text-red-700 underline cursor-pointer bg-transparent border-0";
+        btn.textContent = "Delete Frame";
+        btn.addEventListener("click", function() {
+          deleteFrame(name);
+        });
+
+        li.appendChild(span);
+        li.appendChild(btn);
+        frameList.appendChild(li);
+      });
+    }
+
+    function renderSongList(songs) {
+      clearChildren(songList);
+      if (songs.length === 0) {
+        const p = document.createElement("p");
+        p.className = "text-sm text-gray-500 text-center py-4";
+        p.textContent = "No songs uploaded";
+        const sub = document.createElement("span");
+        sub.className = "block text-sm text-gray-500 leading-normal";
+        sub.textContent = "Upload a plain-text song sheet to get started.";
+        p.appendChild(sub);
+        songList.appendChild(p);
+        return;
+      }
+      songs.forEach(function(filename) {
+        const name = slotName(filename);
+        const li = document.createElement("li");
+        li.className = "flex items-center justify-between py-2";
+
+        const span = document.createElement("span");
+        span.className = "text-sm text-gray-700";
+        span.textContent = name;
+
+        const btn = document.createElement("button");
+        btn.className = "text-sm text-red-500 hover:text-red-700 underline cursor-pointer bg-transparent border-0";
+        btn.textContent = "Delete Song";
+        btn.addEventListener("click", function() {
+          deleteSong(name);
+        });
+
+        li.appendChild(span);
+        li.appendChild(btn);
+        songList.appendChild(li);
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // Upload handlers
+    // -----------------------------------------------------------------------
+
+    frameInput.addEventListener("change", async function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      clearFrameError();
+      setFrameLoading(true);
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const resp = await fetch("/upload/frame", { method: "POST", body: form });
+        if (!resp.ok) {
+          const body = await resp.json();
+          showFrameError(body.detail ?? "Upload failed.");
+        } else {
+          clearFrameError();
+          await refreshManifest();
+        }
+      } catch (err) {
+        showFrameError("Upload failed. " + err.message);
+      } finally {
+        setFrameLoading(false);
+        frameInput.value = "";
+      }
+    });
+
+    songInput.addEventListener("change", async function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      clearSongError();
+      setSongLoading(true);
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const resp = await fetch("/upload/song", { method: "POST", body: form });
+        if (!resp.ok) {
+          const body = await resp.json();
+          showSongError("Upload failed. " + (body.detail ?? ""));
+        } else {
+          clearSongError();
+          await refreshManifest();
+        }
+      } catch (err) {
+        showSongError("Upload failed. " + err.message);
+      } finally {
+        setSongLoading(false);
+        songInput.value = "";
+      }
+    });
+
+    // -----------------------------------------------------------------------
+    // Delete handlers
+    // -----------------------------------------------------------------------
+
+    async function deleteFrame(name) {
+      const resp = await fetch("/frames/" + name, { method: "DELETE" });
+      if (resp.status === 204) {
+        await refreshManifest();
+      } else {
+        console.error("Delete failed:", resp.status);
+      }
+    }
+
+    async function deleteSong(name) {
+      const resp = await fetch("/songs/" + name, { method: "DELETE" });
+      if (resp.status === 204) {
+        await refreshManifest();
+      } else {
+        console.error("Delete failed:", resp.status);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Initialise
+    // -----------------------------------------------------------------------
+
+    document.addEventListener("DOMContentLoaded", function() {
+      refreshManifest();
+    });
+  </script>
 </body>
 </html>
