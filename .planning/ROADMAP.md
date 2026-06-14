@@ -9,7 +9,7 @@
 | # | Phase | Goal | Requirements | Est. Effort |
 |---|-------|------|--------------|-------------|
 | 1 | Conversion Core | 2/2 | Complete    | 2026-06-13 |
-| 2 | FastAPI Server | 2/2 | Complete   | 2026-06-14 |
+| 2 | FastAPI Server | 2/2 | Complete    | 2026-06-14 |
 | 3 | Web UI | Upload forms, thumbnail previews, delete actions, and error display | UI-01, UI-02, UI-03, UI-04, UI-05, UI-06 | 2–3h |
 | 4 | Docker Packaging | Dockerfile, docker-compose, volume mounts, and env configuration | DEPLOY-01, DEPLOY-02, DEPLOY-03 | 1–2h |
 
