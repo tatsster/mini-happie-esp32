@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Birthday Device Manager</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/tailwind.min.css">
 </head>
 <body class="bg-white font-sans">
 
@@ -170,10 +170,17 @@
     // -----------------------------------------------------------------------
 
     async function refreshManifest() {
-      const resp = await fetch("/manifest.json");
-      const data = await resp.json();
-      renderFrameList(data.frames || []);
-      renderSongList(data.songs || []);
+      try {
+        const resp = await fetch("/manifest.json");
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const data = await resp.json();
+        renderFrameList(data.frames || []);
+        renderSongList(data.songs || []);
+      } catch (err) {
+        // Contain the error here so callers (upload handlers, DOMContentLoaded)
+        // are not misled into showing "Upload failed" after a successful upload.
+        console.warn("Could not refresh manifest:", err.message);
+      }
     }
 
     function clearChildren(el) {
@@ -307,20 +314,28 @@
     // -----------------------------------------------------------------------
 
     async function deleteFrame(name) {
-      const resp = await fetch("/frames/" + name, { method: "DELETE" });
-      if (resp.status === 204) {
-        await refreshManifest();
-      } else {
-        console.error("Delete failed:", resp.status);
+      try {
+        const resp = await fetch("/frames/" + name, { method: "DELETE" });
+        if (resp.status === 204) {
+          await refreshManifest();
+        } else {
+          showFrameError("Delete failed (status " + resp.status + ").");
+        }
+      } catch (err) {
+        showFrameError("Delete failed. " + err.message);
       }
     }
 
     async function deleteSong(name) {
-      const resp = await fetch("/songs/" + name, { method: "DELETE" });
-      if (resp.status === 204) {
-        await refreshManifest();
-      } else {
-        console.error("Delete failed:", resp.status);
+      try {
+        const resp = await fetch("/songs/" + name, { method: "DELETE" });
+        if (resp.status === 204) {
+          await refreshManifest();
+        } else {
+          showSongError("Delete failed (status " + resp.status + ").");
+        }
+      } catch (err) {
+        showSongError("Delete failed. " + err.message);
       }
     }
 
