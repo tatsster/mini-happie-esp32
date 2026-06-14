@@ -41,6 +41,12 @@
 
 **Goal:** Implement all REST API endpoints with file storage and manifest management using FastAPI.
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — FastAPI app core, manifest persistence, GET /manifest.json + upload endpoints (Wave 1)
+- [ ] 02-02-PLAN.md — Serve (ETag) + delete (reorder) endpoints + full integration test suite (Wave 2)
+
 **Requirements:**
 
 - API-01: `GET /manifest.json` returns a JSON document listing available frame filenames, song filenames, and an `updated_at` ISO8601 timestamp
