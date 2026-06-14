@@ -100,3 +100,81 @@ async def upload_song(file: Annotated[UploadFile, File()]):
         _write_manifest_atomic(manifest)
 
     return {"name": name}
+
+
+@app.get("/frames/{name}.bin")
+def get_frame_bin(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]):
+    path = FRAMES_DIR / f"{name}.bin"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Frame '{name}' not found")
+    data = path.read_bytes()
+    etag = f'"{hashlib.md5(data).hexdigest()}"'
+    return Response(content=data, media_type="application/octet-stream", headers={"ETag": etag})
+
+
+@app.get("/songs/{name}.json")
+def get_song_json(name: Annotated[str, FPath(pattern=r"^song_\d+$")]):
+    path = SONGS_DIR / f"{name}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Song '{name}' not found")
+    data = path.read_bytes()
+    etag = f'"{hashlib.md5(data).hexdigest()}"'
+    return Response(content=data, media_type="application/json", headers={"ETag": etag})
+
+
+def _delete_frame(name: str) -> None:
+    """Remove frame files and reorder remaining slots. Must be called inside _manifest_lock."""
+    manifest = _read_manifest()
+    if f"{name}.bin" not in manifest["frames"]:
+        raise FileNotFoundError(name)
+
+    idx = int(name.split("_")[1])
+    total = len(manifest["frames"])
+
+    (FRAMES_DIR / f"{name}.bin").unlink(missing_ok=True)
+    (FRAMES_DIR / f"{name}.png").unlink(missing_ok=True)
+
+    for i in range(idx + 1, total):
+        (FRAMES_DIR / f"frame_{i}.bin").rename(FRAMES_DIR / f"frame_{i - 1}.bin")
+        (FRAMES_DIR / f"frame_{i}.png").rename(FRAMES_DIR / f"frame_{i - 1}.png")
+
+    manifest["frames"] = [f"frame_{i}.bin" for i in range(total - 1)]
+    manifest["updated_at"] = _utc_now()
+    _write_manifest_atomic(manifest)
+
+
+def _delete_song(name: str) -> None:
+    """Remove song file and reorder remaining slots. Must be called inside _manifest_lock."""
+    manifest = _read_manifest()
+    if f"{name}.json" not in manifest["songs"]:
+        raise FileNotFoundError(name)
+
+    idx = int(name.split("_")[1])
+    total = len(manifest["songs"])
+
+    (SONGS_DIR / f"{name}.json").unlink(missing_ok=True)
+
+    for i in range(idx + 1, total):
+        (SONGS_DIR / f"song_{i}.json").rename(SONGS_DIR / f"song_{i - 1}.json")
+
+    manifest["songs"] = [f"song_{i}.json" for i in range(total - 1)]
+    manifest["updated_at"] = _utc_now()
+    _write_manifest_atomic(manifest)
+
+
+@app.delete("/frames/{name}", status_code=204)
+def delete_frame(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]):
+    with _manifest_lock:
+        try:
+            _delete_frame(name)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail=f"Frame '{name}' not found")
+
+
+@app.delete("/songs/{name}", status_code=204)
+def delete_song(name: Annotated[str, FPath(pattern=r"^song_\d+$")]):
+    with _manifest_lock:
+        try:
+            _delete_song(name)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail=f"Song '{name}' not found")
