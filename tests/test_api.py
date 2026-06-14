@@ -102,6 +102,24 @@ class TestGetFrameBin:
 
 
 # ---------------------------------------------------------------------------
+# GET /frames/{name}.png
+# ---------------------------------------------------------------------------
+
+
+class TestGetFramePng:
+    def test_get_frame_png(self, client, solid_128x160_png):
+        _upload_frame(client, solid_128x160_png)
+        resp = client.get("/frames/frame_0.png")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/png"
+        assert resp.content[:8] == b"\x89PNG\r\n\x1a\n"  # PNG magic bytes
+
+    def test_get_frame_png_not_found(self, client):
+        resp = client.get("/frames/frame_99.png")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # API-03: GET /songs/{name}.json
 # ---------------------------------------------------------------------------
 
