@@ -13,6 +13,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from server.storage import EMPTY_MANIFEST, _write_manifest_atomic
 from server.routes import frames, manifest, songs
@@ -37,3 +39,13 @@ app = FastAPI(lifespan=lifespan)  # noqa: F841 — ASGI entry point, referenced 
 app.include_router(manifest.router)
 app.include_router(frames.router)
 app.include_router(songs.router)
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+@app.get("/", include_in_schema=False)
+def serve_index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
