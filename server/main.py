@@ -21,6 +21,9 @@ MANIFEST_PATH = DATA_DIR / "manifest.json"
 EMPTY_MANIFEST: dict = {"frames": [], "songs": [], "updated_at": ""}
 _manifest_lock = threading.Lock()
 
+MAX_FRAME_BYTES = 1 * 1024 * 1024   # 1 MB — generous for a 128×160 PNG
+MAX_SONG_BYTES = 64 * 1024           # 64 KB — ample for a text sheet
+
 
 def _write_manifest_atomic(manifest: dict) -> None:
     tmp_fd, tmp_path = tempfile.mkstemp(dir=MANIFEST_PATH.parent, suffix=".tmp")
@@ -65,7 +68,9 @@ def get_manifest():
 
 @app.post("/upload/frame", status_code=201)
 async def upload_frame(file: Annotated[UploadFile, File()]):
-    raw = await file.read()
+    raw = await file.read(MAX_FRAME_BYTES + 1)
+    if len(raw) > MAX_FRAME_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 1 MB)")
     try:
         bin_bytes = convert_png(raw)
     except ValueError as exc:
@@ -86,7 +91,9 @@ async def upload_frame(file: Annotated[UploadFile, File()]):
 
 @app.post("/upload/song", status_code=201)
 async def upload_song(file: Annotated[UploadFile, File()]):
-    raw = await file.read()
+    raw = await file.read(MAX_SONG_BYTES + 1)
+    if len(raw) > MAX_SONG_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 64 KB)")
     try:
         text = raw.decode("utf-8")
         notes = convert_sheet(text)
