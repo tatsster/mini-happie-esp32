@@ -40,8 +40,8 @@ def convert_png(data: bytes, width: int = 128, height: int = 160) -> bytes:
         img = img.resize((width, height), Image.LANCZOS)
         pixels = [_rgb565(*img.getpixel((x, y))) for y in range(height) for x in range(width)]
         return struct.pack(f">{width * height}H", *pixels)
-    except (ValueError, TypeError) as exc:
-        raise exc
+    except (ValueError, TypeError):
+        raise
     except Exception as exc:
         raise ValueError(f"PNG conversion failed: {exc}") from exc
 
