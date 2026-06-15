@@ -11,3 +11,10 @@ build/
 *.map
 
 .planning/
+
+# Runtime upload state — ignore contents, keep directory stubs tracked
+data/frames/*
+!data/frames/.gitkeep
+data/songs/*
+!data/songs/.gitkeep
+data/manifest.json
