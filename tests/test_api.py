@@ -175,6 +175,30 @@ class TestUploadFrame:
         assert resp.status_code == 201
         assert resp.json() == {"name": "frame_1"}
 
+    def test_upload_frame_limit(self, client, solid_128x160_png):
+        from server.storage import MAX_FRAMES
+        for _ in range(MAX_FRAMES):
+            assert _upload_frame(client, solid_128x160_png).status_code == 201
+        resp = _upload_frame(client, solid_128x160_png)
+        assert resp.status_code == 400
+        assert "limit" in resp.json()["detail"].lower()
+
+    def test_upload_frame_jpeg(self, client, solid_jpeg, tmp_path):
+        resp = client.post(
+            "/upload/frame",
+            files={"file": ("photo.jpg", solid_jpeg, "image/jpeg")},
+        )
+        assert resp.status_code == 201
+        assert resp.json() == {"name": "frame_0"}
+        bin_path = tmp_path / "frames" / "frame_0.bin"
+        png_path = tmp_path / "frames" / "frame_0.png"
+        assert bin_path.stat().st_size == 40960  # auto-resized to 128×160
+        # Thumbnail stored as PNG regardless of JPEG input
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(png_path.read_bytes()))
+        assert img.format == "PNG"
+
 
 # ---------------------------------------------------------------------------
 # API-05: POST /upload/song

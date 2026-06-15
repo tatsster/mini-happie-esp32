@@ -21,7 +21,7 @@ check() {
 }
 
 # Required tokens
-check "Birthday Device Manager"
+check "Mini Happie Manager"
 check "tailwind.min.css"
 check "/upload/frame"
 check "/upload/song"
@@ -30,8 +30,8 @@ check "grid-cols-2"
 check "Delete Frame"
 check "Delete Song"
 check "textContent"
-check "Choose a PNG file"
-check "128 × 160 pixels required"
+check "Choose a PNG or JPEG"
+check "auto-scaled to fit"
 check "Choose a song sheet"
 check "Plain text (.txt)"
 check "Uploading"
@@ -40,8 +40,10 @@ check "No songs uploaded"
 check '.replace(/\.[^.]+$/'
 
 # XSS safety — these must NOT appear
+# Thumbnails are created via document.createElement("img") in JS — no literal <img in HTML source.
+# If a literal <img tag appears it means someone bypassed the JS path (could be innerHTML risk).
 if grep -qiF '<img' "$HTML"; then
-  echo "FORBIDDEN: <img tag found (UI-03 is deferred — no img tags allowed)"
+  echo "FORBIDDEN: literal <img tag in HTML source — use document.createElement('img') instead"
   exit 1
 fi
 

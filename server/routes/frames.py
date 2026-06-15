@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, HTTPException, Path as FPath, UploadFile
 from fastapi.responses import Response
 
 from server import storage
-from server.converters import convert_png
+from server.converters import convert_png, to_png_bytes
 
 router = APIRouter()
 
@@ -80,24 +80,43 @@ def get_frame_png(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]) -> Respon
     return Response(content=data, media_type="image/png")
 
 
+_ACCEPTED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/jpg"}
+
+
 @router.post("/upload/frame", status_code=201)
 async def upload_frame(file: Annotated[UploadFile, File()]) -> dict[str, str]:
     import server.main as _main
+
+    if file.content_type and file.content_type not in _ACCEPTED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type '{file.content_type}'. Upload a PNG or JPEG image.",
+        )
 
     raw = await file.read(storage.MAX_FRAME_BYTES + 1)
     if len(raw) > storage.MAX_FRAME_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 1 MB)")
     try:
         bin_bytes = convert_png(raw)
+        # Normalise thumbnail to PNG regardless of original format (JPEG/PNG/…)
+        thumbnail = to_png_bytes(raw)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+    # threading.Lock in an async handler blocks the event loop thread while waiting
+    # for the lock.  Under concurrent load this would be a problem; for this
+    # single-user homelab device the lock is almost never contested in practice.
     with storage._manifest_lock:
         manifest = storage._read_manifest(_main.MANIFEST_PATH)
+        if len(manifest["frames"]) >= storage.MAX_FRAMES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Frame limit reached ({storage.MAX_FRAMES} max). Delete a frame before uploading another.",
+            )
         idx = len(manifest["frames"])
         name = f"frame_{idx}"
         (_main.FRAMES_DIR / f"{name}.bin").write_bytes(bin_bytes)
-        (_main.FRAMES_DIR / f"{name}.png").write_bytes(raw)
+        (_main.FRAMES_DIR / f"{name}.png").write_bytes(thumbnail)
         manifest["frames"].append(f"{name}.bin")
         manifest["updated_at"] = storage._utc_now()
         storage._write_manifest_atomic(manifest, _main.MANIFEST_PATH)

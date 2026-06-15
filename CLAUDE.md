@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Project name:** Mini Happie (repo: happy-birthday-esp32). The web UI is called "Mini Happie Manager".
+
 ## Git commits
 
 **Never commit anything.** The user handles all git commits manually. Do not run `git commit`, `git add`, or any GSD commit helpers (`gsd_run query commit`). Make file changes freely, but stop before staging or committing.

@@ -3,87 +3,372 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Birthday Device Manager</title>
+  <title>Mini Happie Manager</title>
   <link rel="stylesheet" href="/static/tailwind.min.css">
-</head>
-<body class="bg-white font-sans">
+  <style>
+    /* ── Design tokens ────────────────────────────────────────────────────── */
+    :root {
+      --accent:        #E05567;
+      --accent-soft:   #FDF0F2;
+      --accent-hover:  #C94558;
+      --bg:            #F8F7F5;
+      --card:          #FFFFFF;
+      --border:        #E6E2DC;
+      --border-strong: #D4CFC8;
+      --text:          #1A1917;
+      --text-2:        #6B6560;
+      --text-3:        #A39E98;
+      --divider:       #F0EDE8;
+      --danger:        #DC2626;
+      --danger-soft:   #FEF2F2;
+    }
 
-  <!-- Page header -->
-  <header class="bg-gray-100 border-b border-gray-200 px-8 py-4">
-    <h1 class="text-2xl font-semibold text-gray-800 leading-tight">Birthday Device Manager</h1>
+    /* ── Reset / base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      font-family: 'Segoe UI Variable', 'SF Pro Text', -apple-system,
+                   BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ── Accent strip ─────────────────────────────────────────────────────── */
+    body::before {
+      content: '';
+      display: block;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent) 0%, #F4A060 100%);
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 999;
+    }
+
+    /* ── Header ───────────────────────────────────────────────────────────── */
+    .site-header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 3px;
+    }
+
+    .site-header h1 {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--text);
+      margin: 0;
+    }
+
+    .device-badge {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 2px 7px;
+      border-radius: 20px;
+      line-height: 1.8;
+    }
+
+    /* ── Layout ───────────────────────────────────────────────────────────── */
+    .main-content {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 2rem 3rem 5rem;
+    }
+
+    /* ── Cards ────────────────────────────────────────────────────────────── */
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .panel-label {
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin: 0 0 2px;
+    }
+
+    /* ── Upload zone ──────────────────────────────────────────────────────── */
+    .upload-zone {
+      display: block;
+      border: 1.5px dashed var(--border-strong);
+      border-radius: 8px;
+      padding: 22px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.14s ease, background 0.14s ease;
+      text-decoration: none;
+    }
+
+    .upload-zone:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .upload-zone:focus-within {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* loading state disabling is handled by Tailwind pointer-events-none + opacity-60 */
+
+    .zone-title {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+
+    .zone-sub {
+      display: block;
+      font-size: 12px;
+      color: var(--text-3);
+      margin-top: 3px;
+    }
+
+    /* ── Spinner ──────────────────────────────────────────────────────────── */
+    @keyframes _spin { to { transform: rotate(360deg); } }
+
+    .spin-ring {
+      display: inline-block;
+      width: 15px;
+      height: 15px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: _spin 0.65s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    .uploading-text {
+      font-size: 12px;
+      color: var(--text-2);
+      vertical-align: middle;
+    }
+
+    /* ── Error line ───────────────────────────────────────────────────────── */
+    .err-line {
+      font-size: 12px;
+      color: var(--danger);
+      margin-top: 0;
+      padding: 6px 10px;
+      background: var(--danger-soft);
+      border-radius: 6px;
+      border-left: 3px solid var(--danger);
+    }
+
+    /* ── Frame card grid ──────────────────────────────────────────────────── */
+    .frame-grid {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 12px;
+    }
+
+    .frame-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: box-shadow 0.15s, border-color 0.15s;
+    }
+
+    .frame-card:hover {
+      border-color: var(--border-strong);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+    }
+
+    /* aspect-ratio 128:160 — exact TFT display proportions */
+    .frame-thumb {
+      width: 100%;
+      aspect-ratio: 128 / 160;
+      object-fit: cover;
+      display: block;
+      background: var(--border);
+    }
+
+    .frame-card-footer {
+      padding: 7px 8px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      border-top: 1px solid var(--divider);
+    }
+
+    /* ── Song list ────────────────────────────────────────────────────────── */
+    .item-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .item-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--divider);
+    }
+
+    .item-row:last-child { border-bottom: none; }
+
+    .item-row .left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .slot-tag {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 1px 5px;
+      border-radius: 4px;
+      margin-right: 7px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .slot-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .del-btn {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-3);
+      background: none;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      cursor: pointer;
+      padding: 3px 8px;
+      transition: color 0.12s, background 0.12s, border-color 0.12s;
+      white-space: nowrap;
+    }
+
+    .del-btn:hover {
+      color: var(--danger);
+      background: var(--danger-soft);
+      border-color: #FECACA;
+    }
+
+    /* ── Empty state ──────────────────────────────────────────────────────── */
+    .empty-wrap {
+      padding: 24px 12px;
+      text-align: center;
+    }
+
+    .empty-icon {
+      font-size: 20px;
+      display: block;
+      margin-bottom: 6px;
+      opacity: 0.35;
+    }
+
+    .empty-head {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-2);
+      display: block;
+    }
+
+    .empty-sub {
+      font-size: 12px;
+      color: var(--text-3);
+      display: block;
+      margin-top: 3px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="site-header">
+    <h1>Mini Happie Manager</h1>
+    <span class="device-badge">ESP32</span>
   </header>
 
-  <!-- Main content -->
-  <div class="max-w-5xl mx-auto px-8 py-12">
+  <div class="main-content">
     <div class="grid grid-cols-2 gap-8">
 
       <!-- Frames column -->
-      <section class="bg-gray-100 rounded-lg border border-gray-200 p-6 flex flex-col gap-4">
-        <h2 class="text-xl font-semibold text-gray-800">Frames</h2>
+      <section class="panel" aria-labelledby="frames-heading">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px;">
+          <p id="frames-heading" class="panel-label" style="margin:0;">Frames</p>
+          <span id="frame-counter" style="font-size:11px;font-weight:600;color:var(--text-3);font-variant-numeric:tabular-nums;"></span>
+        </div>
 
-        <!-- Upload zone -->
-        <label id="frame-label"
-               class="block border-2 border-dashed border-gray-300 rounded-md py-8 px-4 text-center cursor-pointer hover:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2">
-          <!-- Idle state -->
+        <label id="frame-label" class="upload-zone">
           <span id="frame-idle">
-            <span class="block text-sm font-semibold text-gray-700 leading-snug">Choose a PNG file</span>
-            <span class="block text-sm text-gray-500 leading-normal">128 × 160 pixels required</span>
+            <span class="zone-title">Choose a PNG or JPEG</span>
+            <span class="zone-sub">Any size — auto-scaled to fit display</span>
           </span>
-          <!-- Loading state (hidden by default) -->
           <span id="frame-loading" class="hidden items-center justify-center gap-2">
-            <svg class="animate-spin h-5 w-5 text-blue-500 inline-block"
-                 xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10"
-                      stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-            </svg>
-            <span class="text-sm text-gray-700">Uploading&#8230;</span>
+            <span class="spin-ring" aria-hidden="true"></span>
+            <span class="uploading-text">Uploading&#8230;</span>
           </span>
-          <input id="frame-input" type="file" accept=".png,image/png" class="sr-only">
+          <input id="frame-input" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" class="sr-only">
         </label>
 
-        <!-- Error area -->
-        <p id="frame-error" class="text-sm text-red-500 mt-1 hidden"></p>
+        <p id="frame-error" class="err-line hidden" role="alert"></p>
 
-        <!-- List -->
-        <ul id="frame-list" class="flex flex-col divide-y divide-gray-200">
-          <!-- Rows rendered by JS -->
+        <ul id="frame-list" class="item-list" aria-label="Uploaded frames">
+          <!-- rows rendered by JS -->
         </ul>
       </section>
 
       <!-- Songs column -->
-      <section class="bg-gray-100 rounded-lg border border-gray-200 p-6 flex flex-col gap-4">
-        <h2 class="text-xl font-semibold text-gray-800">Songs</h2>
+      <section class="panel" aria-labelledby="songs-heading">
+        <p id="songs-heading" class="panel-label">Songs</p>
 
-        <!-- Upload zone -->
-        <label id="song-label"
-               class="block border-2 border-dashed border-gray-300 rounded-md py-8 px-4 text-center cursor-pointer hover:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2">
-          <!-- Idle state -->
+        <label id="song-label" class="upload-zone">
           <span id="song-idle">
-            <span class="block text-sm font-semibold text-gray-700 leading-snug">Choose a song sheet</span>
-            <span class="block text-sm text-gray-500 leading-normal">Plain text (.txt)</span>
+            <span class="zone-title">Choose a song sheet</span>
+            <span class="zone-sub">Plain text (.txt)</span>
           </span>
-          <!-- Loading state (hidden by default) -->
           <span id="song-loading" class="hidden items-center justify-center gap-2">
-            <svg class="animate-spin h-5 w-5 text-blue-500 inline-block"
-                 xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10"
-                      stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-            </svg>
-            <span class="text-sm text-gray-700">Uploading&#8230;</span>
+            <span class="spin-ring" aria-hidden="true"></span>
+            <span class="uploading-text">Uploading&#8230;</span>
           </span>
           <input id="song-input" type="file" accept=".txt,text/plain" class="sr-only">
         </label>
 
-        <!-- Error area -->
-        <p id="song-error" class="text-sm text-red-500 mt-1 hidden"></p>
+        <p id="song-error" class="err-line hidden" role="alert"></p>
 
-        <!-- List -->
-        <ul id="song-list" class="flex flex-col divide-y divide-gray-200">
-          <!-- Rows rendered by JS -->
+        <ul id="song-list" class="item-list" aria-label="Uploaded songs">
+          <!-- rows rendered by JS -->
         </ul>
       </section>
 
@@ -91,9 +376,9 @@
   </div>
 
   <script>
-    // -----------------------------------------------------------------------
-    // DOM references
-    // -----------------------------------------------------------------------
+    const MAX_FRAMES = 6;
+
+    // ── DOM references ──────────────────────────────────────────────────────
     const frameInput   = document.getElementById("frame-input");
     const frameLabel   = document.getElementById("frame-label");
     const frameIdle    = document.getElementById("frame-idle");
@@ -108,9 +393,7 @@
     const songError    = document.getElementById("song-error");
     const songList     = document.getElementById("song-list");
 
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
+    // ── Helpers ─────────────────────────────────────────────────────────────
 
     /** Strip the last extension from a filename: "frame_0.bin" -> "frame_0" */
     function slotName(filename) {
@@ -165,9 +448,7 @@
       songError.classList.add("hidden");
     }
 
-    // -----------------------------------------------------------------------
-    // Manifest fetch + list rendering
-    // -----------------------------------------------------------------------
+    // ── Manifest fetch + list rendering ─────────────────────────────────────
 
     async function refreshManifest() {
       try {
@@ -177,8 +458,6 @@
         renderFrameList(data.frames || []);
         renderSongList(data.songs || []);
       } catch (err) {
-        // Contain the error here so callers (upload handlers, DOMContentLoaded)
-        // are not misled into showing "Upload failed" after a successful upload.
         console.warn("Could not refresh manifest:", err.message);
       }
     }
@@ -189,35 +468,71 @@
 
     function renderFrameList(frames) {
       clearChildren(frameList);
+      frameList.className = "item-list";   // reset; grid class set below when items exist
+
+      // Counter + upload zone state
+      const counter = document.getElementById("frame-counter");
+      const full = frames.length >= MAX_FRAMES;
+      if (counter) {
+        counter.textContent = frames.length + " / " + MAX_FRAMES;
+        counter.style.color = full ? "var(--danger)" : "var(--text-3)";
+      }
+      if (full) {
+        frameLabel.classList.add("pointer-events-none", "opacity-60");
+        frameIdle.querySelector(".zone-sub").textContent = "Limit reached — delete a frame to upload another.";
+      } else {
+        frameLabel.classList.remove("pointer-events-none", "opacity-60");
+        frameIdle.querySelector(".zone-sub").textContent = "Any size — auto-scaled to fit display";
+      }
+
       if (frames.length === 0) {
-        const p = document.createElement("p");
-        p.className = "text-sm text-gray-500 text-center py-4";
-        p.textContent = "No frames uploaded";
+        const wrap = document.createElement("div");
+        wrap.className = "empty-wrap";
+        const icon = document.createElement("span");
+        icon.className = "empty-icon";
+        icon.textContent = "🖼";
+        const head = document.createElement("span");
+        head.className = "empty-head";
+        head.textContent = "No frames uploaded";
         const sub = document.createElement("span");
-        sub.className = "block text-sm text-gray-500 leading-normal";
-        sub.textContent = "Upload a 128\xD7160 PNG to get started.";
-        p.appendChild(sub);
-        frameList.appendChild(p);
+        sub.className = "empty-sub";
+        sub.textContent = "Upload any PNG — it will be scaled to fit.";
+        wrap.appendChild(icon);
+        wrap.appendChild(head);
+        wrap.appendChild(sub);
+        frameList.appendChild(wrap);
         return;
       }
+      frameList.className = "frame-grid";
       frames.forEach(function(filename) {
         const name = slotName(filename);
-        const li = document.createElement("li");
-        li.className = "flex items-center justify-between py-2";
+        const num  = name.replace("frame_", "");
 
-        const span = document.createElement("span");
-        span.className = "text-sm text-gray-700";
-        span.textContent = name;
+        const li = document.createElement("li");
+        li.className = "frame-card";
+
+        // Thumbnail — served by GET /frames/{name}.png (added in Phase 3)
+        const thumb = document.createElement("img");
+        thumb.src = "/frames/" + name + ".png";
+        thumb.alt = name;
+        thumb.className = "frame-thumb";
+
+        const footer = document.createElement("div");
+        footer.className = "frame-card-footer";
+
+        const badge = document.createElement("span");
+        badge.className = "slot-tag";
+        badge.textContent = "#" + num;
 
         const btn = document.createElement("button");
-        btn.className = "text-sm text-red-500 hover:text-red-700 underline cursor-pointer bg-transparent border-0";
+        btn.className = "del-btn";
         btn.textContent = "Delete Frame";
-        btn.addEventListener("click", function() {
-          deleteFrame(name);
-        });
+        btn.addEventListener("click", function() { deleteFrame(name); });
 
-        li.appendChild(span);
-        li.appendChild(btn);
+        footer.appendChild(badge);
+        footer.appendChild(btn);
+        li.appendChild(thumb);
+        li.appendChild(footer);
         frameList.appendChild(li);
       });
     }
@@ -225,41 +540,53 @@
     function renderSongList(songs) {
       clearChildren(songList);
       if (songs.length === 0) {
-        const p = document.createElement("p");
-        p.className = "text-sm text-gray-500 text-center py-4";
-        p.textContent = "No songs uploaded";
+        const wrap = document.createElement("div");
+        wrap.className = "empty-wrap";
+        const icon = document.createElement("span");
+        icon.className = "empty-icon";
+        icon.textContent = "🎵";
+        const head = document.createElement("span");
+        head.className = "empty-head";
+        head.textContent = "No songs uploaded";
         const sub = document.createElement("span");
-        sub.className = "block text-sm text-gray-500 leading-normal";
+        sub.className = "empty-sub";
         sub.textContent = "Upload a plain-text song sheet to get started.";
-        p.appendChild(sub);
-        songList.appendChild(p);
+        wrap.appendChild(icon);
+        wrap.appendChild(head);
+        wrap.appendChild(sub);
+        songList.appendChild(wrap);
         return;
       }
       songs.forEach(function(filename) {
         const name = slotName(filename);
-        const li = document.createElement("li");
-        li.className = "flex items-center justify-between py-2";
+        const num  = name.replace("song_", "");
 
-        const span = document.createElement("span");
-        span.className = "text-sm text-gray-700";
-        span.textContent = name;
+        const li = document.createElement("li");
+        li.className = "item-row";
+
+        const left = document.createElement("span");
+        left.className = "left";
+        const badge = document.createElement("span");
+        badge.className = "slot-tag";
+        badge.textContent = "#" + num;
+        const label = document.createElement("span");
+        label.className = "slot-name";
+        label.textContent = name;
+        left.appendChild(badge);
+        left.appendChild(label);
 
         const btn = document.createElement("button");
-        btn.className = "text-sm text-red-500 hover:text-red-700 underline cursor-pointer bg-transparent border-0";
+        btn.className = "del-btn";
         btn.textContent = "Delete Song";
-        btn.addEventListener("click", function() {
-          deleteSong(name);
-        });
+        btn.addEventListener("click", function() { deleteSong(name); });
 
-        li.appendChild(span);
+        li.appendChild(left);
         li.appendChild(btn);
         songList.appendChild(li);
       });
     }
 
-    // -----------------------------------------------------------------------
-    // Upload handlers
-    // -----------------------------------------------------------------------
+    // ── Upload handlers ──────────────────────────────────────────────────────
 
     frameInput.addEventListener("change", async function(e) {
       const file = e.target.files[0];
@@ -309,9 +636,7 @@
       }
     });
 
-    // -----------------------------------------------------------------------
-    // Delete handlers
-    // -----------------------------------------------------------------------
+    // ── Delete handlers ───────────────────────────────────────────────────────
 
     async function deleteFrame(name) {
       try {
@@ -339,9 +664,7 @@
       }
     }
 
-    // -----------------------------------------------------------------------
-    // Initialise
-    // -----------------------------------------------------------------------
+    // ── Init ──────────────────────────────────────────────────────────────────
 
     document.addEventListener("DOMContentLoaded", function() {
       refreshManifest();

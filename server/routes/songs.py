@@ -79,6 +79,9 @@ async def upload_song(file: Annotated[UploadFile, File()]) -> dict[str, str]:
     except (ValueError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+    # threading.Lock in an async handler blocks the event loop thread while waiting
+    # for the lock.  Under concurrent load this would be a problem; for this
+    # single-user homelab device the lock is almost never contested in practice.
     with storage._manifest_lock:
         manifest = storage._read_manifest(_main.MANIFEST_PATH)
         idx = len(manifest["songs"])

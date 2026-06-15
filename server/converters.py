@@ -5,6 +5,7 @@ from typing import TypedDict
 
 from PIL import Image
 
+
 class Note(TypedDict):
     freq: int
     ms: int
@@ -34,10 +35,43 @@ DURATION_BEATS = {
 
 
 def _rgb565(r: int, g: int, b: int) -> int:
+    """Pack 8-bit RGB channels into a 16-bit RGB565 big-endian word."""
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
 
+def to_png_bytes(data: bytes) -> bytes:
+    """Re-encode any PIL-supported image (PNG, JPEG, …) as PNG bytes.
+
+    Used to normalise uploaded images to a single format before storing
+    the thumbnail copy, so GET /frames/{name}.png always serves a valid PNG
+    regardless of what the user originally uploaded.
+    """
+    try:
+        img = Image.open(io.BytesIO(data))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception as exc:
+        raise ValueError(f"Could not decode image: {exc}") from exc
+
+
 def convert_png(data: bytes, width: int = 128, height: int = 160) -> bytes:
+    """Convert image bytes to a raw RGB565 big-endian frame buffer.
+
+    Alpha-bearing modes (RGBA, LA, P) are composited onto a black background
+    before conversion so that transparency is flattened to opaque pixels.
+
+    Args:
+        data: Raw bytes of any PIL-supported image format (PNG, JPEG, …).
+        width: Target width in pixels. Defaults to 128.
+        height: Target height in pixels. Defaults to 160.
+
+    Returns:
+        Raw bytes — ``width * height * 2`` bytes, big-endian RGB565.
+
+    Raises:
+        ValueError: If *data* cannot be decoded or converted.
+    """
     try:
         img = Image.open(io.BytesIO(data))
         if img.mode in ("RGBA", "LA", "P"):
@@ -55,6 +89,14 @@ _NOTE_RE = re.compile(r"^([A-Ga-g][#Bb]?)(-?\d+)$")
 
 
 def _note_to_freq(note_str: str) -> int:
+    """Convert a note string (e.g. ``'C4'``, ``'F#3'``, ``'R'``) to a frequency in Hz.
+
+    ``'R'`` (rest) returns 0.  Frequency is calculated from equal temperament
+    with A4 = 440 Hz.
+
+    Raises:
+        ValueError: If the note name or octave is missing or unrecognised.
+    """
     note_str = note_str.strip()
     if note_str.upper() == "R":
         return 0
@@ -73,10 +115,28 @@ def _note_to_freq(note_str: str) -> int:
 
 
 def _beats_to_ms(beats: float, bpm: float) -> int:
+    """Convert a beat count to milliseconds at the given tempo."""
     return round((beats / bpm) * 60_000)
 
 
 def convert_sheet(text: str, bpm: float = 120.0) -> list[Note]:
+    """Parse a plain-text music sheet into a list of Note dicts.
+
+    Each non-blank, non-comment line must be ``<note> <duration>`` where
+    ``<note>`` is a standard note name with octave (e.g. ``C4``, ``F#3``) or
+    ``R`` for a rest, and ``<duration>`` is one of the keys in
+    :data:`DURATION_BEATS` (e.g. ``q``, ``e.``).
+
+    Args:
+        text: Raw text content of the sheet file.
+        bpm: Tempo in beats per minute. Defaults to 120.
+
+    Returns:
+        Ordered list of :class:`Note` dicts with ``freq`` (Hz) and ``ms`` keys.
+
+    Raises:
+        ValueError: On any malformed line, unknown note, or unknown duration.
+    """
     result = []
     for lineno, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()

@@ -1,5 +1,6 @@
 import io
-import pathlib
+from pathlib import Path
+
 import pytest
 from PIL import Image
 
@@ -41,6 +42,15 @@ def solid_128x160_png():
 
 
 @pytest.fixture
+def solid_jpeg():
+    """A 300×400 JPEG — larger than 128×160 to exercise auto-resize."""
+    img = Image.new("RGB", (300, 400), color=(200, 100, 50))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+@pytest.fixture
 def small_png():
     img = Image.new("RGB", (32, 32), color=(100, 150, 200))
     return _png_bytes(img)
@@ -48,5 +58,5 @@ def small_png():
 
 @pytest.fixture
 def happy_birthday_text():
-    root = pathlib.Path(__file__).parent.parent
+    root = Path(__file__).parent.parent
     return (root / "assets" / "happy_birthday.txt").read_text(encoding="utf-8")

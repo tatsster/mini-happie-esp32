@@ -22,6 +22,7 @@ _manifest_lock = threading.Lock()
 
 MAX_FRAME_BYTES = 1 * 1024 * 1024  # 1 MB — generous for a 128×160 PNG
 MAX_SONG_BYTES = 64 * 1024  # 64 KB — ample for a text sheet
+MAX_FRAMES = 6  # LittleFS practical limit for the ESP32 device
 
 
 def _write_manifest_atomic(manifest: dict[str, Any], manifest_path: Path) -> None:
@@ -47,4 +48,4 @@ def _read_manifest(manifest_path: Path) -> dict[str, Any]:
 
 def _utc_now() -> str:
     """Return the current UTC time as an ISO-8601 string."""
-    return datetime.datetime.now(datetime.UTC).isoformat()
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
