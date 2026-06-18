@@ -355,17 +355,23 @@
 
         <label id="song-label" class="upload-zone">
           <span id="song-idle">
-            <span class="zone-title">Choose a song sheet</span>
-            <span class="zone-sub">Plain text (.txt)</span>
+            <span class="zone-title">Upload melody audio</span>
+            <span class="zone-sub">WAV or MP3 recording of your melody</span>
           </span>
           <span id="song-loading" class="hidden items-center justify-center gap-2">
             <span class="spin-ring" aria-hidden="true"></span>
             <span class="uploading-text">Uploading&#8230;</span>
           </span>
-          <input id="song-input" type="file" accept=".txt,text/plain" class="sr-only">
+          <input id="song-input" type="file" accept=".wav,.mp3,audio/wav,audio/mpeg" class="sr-only">
         </label>
 
         <p id="song-error" class="err-line hidden" role="alert"></p>
+
+        <p id="song-warning" class="hidden" role="status"
+           style="font-size:13px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;margin-top:8px;">
+          This audio has complex harmonics &#8212; buzzer playback may sound approximate.
+          Best results with whistling, humming, or a single instrument.
+        </p>
 
         <ul id="song-list" class="item-list" aria-label="Uploaded songs">
           <!-- rows rendered by JS -->
@@ -391,6 +397,7 @@
     const songIdle     = document.getElementById("song-idle");
     const songLoading  = document.getElementById("song-loading");
     const songError    = document.getElementById("song-error");
+    const songWarning  = document.getElementById("song-warning");
     const songList     = document.getElementById("song-list");
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -446,6 +453,14 @@
     function clearSongError() {
       songError.textContent = "";
       songError.classList.add("hidden");
+    }
+
+    function showSongWarning() {
+      songWarning.classList.remove("hidden");
+    }
+
+    function clearSongWarning() {
+      songWarning.classList.add("hidden");
     }
 
     // ── Manifest fetch + list rendering ─────────────────────────────────────
@@ -624,12 +639,20 @@
         if (!resp.ok) {
           const body = await resp.json();
           showSongError("Upload failed. " + (body.detail ?? ""));
+          clearSongWarning();
         } else {
           clearSongError();
+          const body = await resp.json();
+          if (body.is_complex) {
+            showSongWarning();
+          } else {
+            clearSongWarning();
+          }
           await refreshManifest();
         }
       } catch (err) {
         showSongError("Upload failed. " + err.message);
+        clearSongWarning();
       } finally {
         setSongLoading(false);
         songInput.value = "";

@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Install Pillow system dependencies in a single layer to keep image small
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libjpeg-dev zlib1g-dev \
+    && apt-get install -y --no-install-recommends libjpeg-dev zlib1g-dev ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for pip layer caching (requirements change rarely)

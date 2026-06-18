@@ -9,6 +9,7 @@ build/
 *.elf
 *.hex
 *.map
+**/__pycache__/
 
 .planning/
 

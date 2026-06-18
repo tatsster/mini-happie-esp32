@@ -1,6 +1,9 @@
 services:
   server:
-    build: .
+    # Pull the published multi-arch image (built/pushed via `docker buildx ... --push`).
+    # The manifest auto-resolves to the host's arch (linux/amd64 on the homelab).
+    image: tatsster/mini-happie:latest
+    pull_policy: always
     ports:
       # 0.0.0.0 intentional — ESP32 connects over LAN; restrict to LAN IP if firewall is needed
       - "${PORT:-8080}:${PORT:-8080}"

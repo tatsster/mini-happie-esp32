@@ -1,37 +1,16 @@
 import io
-import re
 import struct
 from typing import TypedDict
 
+import numpy as np
 from PIL import Image
+from pydub import AudioSegment
+import librosa
 
 
 class Note(TypedDict):
     freq: int
     ms: int
-
-
-SEMITONES = {
-    "C": 0, "C#": 1, "DB": 1,
-    "D": 2, "D#": 3, "EB": 3,
-    "E": 4, "FB": 4,
-    "F": 5, "F#": 6, "GB": 6,
-    "G": 7, "G#": 8, "AB": 8,
-    "A": 9, "A#": 10, "BB": 10,
-    "B": 11, "CB": 11, "B#": 0,
-}
-
-DURATION_BEATS = {
-    "w": 4.0,
-    "h": 2.0,
-    "q": 1.0,
-    "e": 0.5,
-    "s": 0.25,
-    "w.": 6.0,
-    "h.": 3.0,
-    "q.": 1.5,
-    "e.": 0.75,
-}
 
 
 def _rgb565(r: int, g: int, b: int) -> int:
@@ -85,71 +64,76 @@ def convert_png(data: bytes, width: int = 128, height: int = 160) -> bytes:
         raise ValueError(f"PNG conversion failed: {exc}") from exc
 
 
-_NOTE_RE = re.compile(r"^([A-Ga-g][#Bb]?)(-?\d+)$")
+def convert_audio(data: bytes, fmt: str = "wav") -> tuple[list[Note], bool]:
+    """Convert WAV or MP3 audio bytes into a note sequence for the ESP32 buzzer.
 
-
-def _note_to_freq(note_str: str) -> int:
-    """Convert a note string (e.g. ``'C4'``, ``'F#3'``, ``'R'``) to a frequency in Hz.
-
-    ``'R'`` (rest) returns 0.  Frequency is calculated from equal temperament
-    with A4 = 440 Hz.
-
-    Raises:
-        ValueError: If the note name or octave is missing or unrecognised.
-    """
-    note_str = note_str.strip()
-    if note_str.upper() == "R":
-        return 0
-    m = _NOTE_RE.match(note_str)
-    if not m:
-        # Distinguish "unknown note name" from "missing octave" for test compatibility.
-        letter = re.match(r"^[A-Ga-g][#Bb]?", note_str)
-        if letter and note_str[letter.end():] == "":
-            raise ValueError(f"Missing octave in: '{note_str}'")
-        raise ValueError(f"Unknown note name: '{note_str}'")
-    note_name, octave_str = m.group(1).upper(), m.group(2)
-    if note_name not in SEMITONES:
-        raise ValueError(f"Unknown note name: '{note_str}'")
-    midi = (int(octave_str) + 1) * 12 + SEMITONES[note_name]
-    return round(440.0 * (2 ** ((midi - 69) / 12.0)))
-
-
-def _beats_to_ms(beats: float, bpm: float) -> int:
-    """Convert a beat count to milliseconds at the given tempo."""
-    return round((beats / bpm) * 60_000)
-
-
-def convert_sheet(text: str, bpm: float = 120.0) -> list[Note]:
-    """Parse a plain-text music sheet into a list of Note dicts.
-
-    Each non-blank, non-comment line must be ``<note> <duration>`` where
-    ``<note>`` is a standard note name with octave (e.g. ``C4``, ``F#3``) or
-    ``R`` for a rest, and ``<duration>`` is one of the keys in
-    :data:`DURATION_BEATS` (e.g. ``q``, ``e.``).
+    Decodes the audio with pydub, resamples to 22050 Hz mono float32, detects
+    note onsets with librosa, extracts per-segment pitch with librosa pyin
+    (run once on the full signal), and computes a polyphony flag from spectral
+    flatness and median voicing probability.
 
     Args:
-        text: Raw text content of the sheet file.
-        bpm: Tempo in beats per minute. Defaults to 120.
+        data: Raw bytes of a WAV or MP3 audio file.
+        fmt: Audio format string — ``"wav"`` or ``"mp3"``. Must be supplied
+             explicitly because pydub cannot reliably sniff MP3 from BytesIO.
 
     Returns:
-        Ordered list of :class:`Note` dicts with ``freq`` (Hz) and ``ms`` keys.
+        A tuple ``(notes, is_complex)`` where ``notes`` is an ordered list of
+        :class:`Note` dicts with ``freq`` (Hz) and ``ms`` keys, and
+        ``is_complex`` is ``True`` when the audio has polyphonic or noisy
+        content that the ESP32 buzzer cannot reproduce accurately.
 
     Raises:
-        ValueError: On any malformed line, unknown note, or unknown duration.
+        ValueError: If *data* cannot be decoded (``"Could not decode audio"``),
+                    if the audio is shorter than 1 second (``"Audio too short
+                    for conversion"``), or if no pitched content is found
+                    (``"No pitched content detected"``).
     """
-    result = []
-    for lineno, raw in enumerate(text.splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split()
-        if len(parts) != 2:
-            raise ValueError(f"Line {lineno}: expected '<note> <duration>', got: '{line}'")
-        note_str, dur_str = parts
-        dur_str = dur_str.lower()
-        if dur_str not in DURATION_BEATS:
-            raise ValueError(f"Line {lineno}: unknown duration '{dur_str}'")
-        freq = _note_to_freq(note_str)
-        ms = _beats_to_ms(DURATION_BEATS[dur_str], bpm)
-        result.append(Note(freq=freq, ms=ms))
-    return result
+    # 1. Decode audio bytes using pydub; fmt must be explicit for BytesIO (Pitfall 4).
+    try:
+        seg = AudioSegment.from_file(io.BytesIO(data), format=fmt)
+    except Exception as exc:
+        raise ValueError(f"Could not decode audio: {exc}") from exc
+
+    # 2. Normalise to 22050 Hz mono float32 in [-1.0, 1.0] (Pitfall 3).
+    seg = seg.set_frame_rate(22050).set_channels(1)
+    raw = np.array(seg.get_array_of_samples(), dtype=np.float32)
+    y = raw / (2 ** (seg.sample_width * 8 - 1))
+    sr = 22050
+
+    # 3. Duration guard — librosa needs at least 1 second of signal.
+    if len(y) / sr < 1.0:
+        raise ValueError("Audio too short for conversion")
+
+    # 4. Onset detection; prepend 0.0 when audio starts immediately (Pitfall 1).
+    onsets = librosa.onset.onset_detect(y=y, sr=sr, units="time")
+    if len(onsets) == 0 or onsets[0] > 0.1:
+        onsets = np.concatenate([[0.0], onsets])
+
+    # 5. Full-signal pYIN pitch extraction (run once — not per segment).
+    f0, voiced_flag, voiced_prob = librosa.pyin(y, fmin=80, fmax=2000, sr=sr)
+
+    # 6. Per-onset segment extraction.
+    hop_length = 512
+    onset_frames = librosa.time_to_frames(onsets, sr=sr, hop_length=hop_length)
+    total_frames = len(f0)
+    boundaries = list(onset_frames) + [total_frames]
+
+    notes: list[Note] = []
+    for i in range(len(onset_frames)):
+        start_f, end_f = boundaries[i], boundaries[i + 1]
+        dur_ms = max(80, int((end_f - start_f) * hop_length / sr * 1000))
+        seg_voiced = f0[start_f:end_f][voiced_flag[start_f:end_f]]
+        freq = int(np.nanmedian(seg_voiced)) if len(seg_voiced) > 0 else 0
+        notes.append(Note(freq=freq, ms=dur_ms))
+
+    # 7. Guard against all-unvoiced / silence audio (Pitfall 6).
+    if not notes:
+        raise ValueError("No pitched content detected")
+
+    # 8. Polyphony score: high flatness OR low median voicing probability → complex.
+    flatness = float(np.mean(librosa.feature.spectral_flatness(y=y)))
+    median_vp = float(np.median(voiced_prob))
+    is_complex = flatness > 0.15 or median_vp < 0.5
+
+    return notes, is_complex

@@ -6,6 +6,7 @@ Each test class maps to one API requirement or security concern.
 
 import io
 import json
+import shutil
 
 import pytest
 from PIL import Image
@@ -39,9 +40,6 @@ def _make_png(width: int = 128, height: int = 160, color: str = "white") -> byte
     return buf.getvalue()
 
 
-_VALID_SHEET = b"C4 q\nD4 q\nE4 q\n"
-
-
 def _upload_frame(client, png_bytes: bytes = None):
     if png_bytes is None:
         png_bytes = _make_png()
@@ -51,12 +49,10 @@ def _upload_frame(client, png_bytes: bytes = None):
     )
 
 
-def _upload_song(client, sheet_bytes: bytes = None):
-    if sheet_bytes is None:
-        sheet_bytes = _VALID_SHEET
+def _upload_wav(client, wav_bytes: bytes, filename: str = "song.wav"):
     return client.post(
         "/upload/song",
-        files={"file": ("song.txt", sheet_bytes, "text/plain")},
+        files={"file": (filename, wav_bytes, "audio/wav")},
     )
 
 
@@ -76,9 +72,9 @@ class TestGetManifest:
         assert body["frames"] == []
         assert body["songs"] == []
 
-    def test_manifest_after_upload(self, client, solid_128x160_png):
+    def test_manifest_after_upload(self, client, solid_128x160_png, sine_wav):
         _upload_frame(client, solid_128x160_png)
-        _upload_song(client)
+        _upload_wav(client, sine_wav)
         body = client.get("/manifest.json").json()
         assert "frame_0.bin" in body["frames"]
         assert "song_0.json" in body["songs"]
@@ -125,11 +121,8 @@ class TestGetFramePng:
 
 
 class TestGetSongJson:
-    def test_get_song_json(self, client, happy_birthday_text):
-        client.post(
-            "/upload/song",
-            files={"file": ("song.txt", happy_birthday_text.encode(), "text/plain")},
-        )
+    def test_get_song_json(self, client, sine_wav):
+        _upload_wav(client, sine_wav)
         resp = client.get("/songs/song_0.json")
         assert resp.status_code == 200
         notes = resp.json()
@@ -206,15 +199,66 @@ class TestUploadFrame:
 
 
 class TestUploadSong:
-    def test_upload_song(self, client):
-        resp = _upload_song(client)
+    def test_upload_wav(self, client, sine_wav):
+        resp = _upload_wav(client, sine_wav)
         assert resp.status_code == 201
+        body = resp.json()
+        assert "name" in body
+        assert body["notes"] > 0
+        assert body["is_complex"] is False
         manifest = client.get("/manifest.json").json()
         assert "song_0.json" in manifest["songs"]
 
-    def test_upload_song_invalid_sheet(self, client):
-        resp = _upload_song(client, b"not a valid note line at all $$$")
+    def test_upload_wav_complex(self, client, noise_wav):
+        resp = _upload_wav(client, noise_wav)
+        assert resp.status_code == 201
+        assert resp.json()["is_complex"] is True
+
+    def test_upload_wav_corrupt(self, client):
+        resp = _upload_wav(client, b"not audio at all")
         assert resp.status_code == 422
+
+    def test_upload_wav_too_short(self, client, short_wav):
+        resp = _upload_wav(client, short_wav)
+        assert resp.status_code == 422
+        assert "too short" in resp.json()["detail"].lower()
+
+    def test_upload_song_too_large(self, client):
+        big = b"\x00" * (2 * 1024 * 1024 + 1)
+        resp = _upload_wav(client, big)
+        assert resp.status_code == 413
+
+    def test_upload_unsupported_type(self, client):
+        resp = client.post(
+            "/upload/song",
+            files={"file": ("song.ogg", b"junk", "audio/ogg")},
+        )
+        assert resp.status_code == 415
+
+    def test_upload_replaces_existing_song(self, client, tmp_path, sine_wav, noise_wav):
+        _upload_wav(client, sine_wav)
+        content_after_first = (tmp_path / "songs" / "song_0.json").read_text()
+        _upload_wav(client, noise_wav)
+        content_after_second = (tmp_path / "songs" / "song_0.json").read_text()
+        manifest = client.get("/manifest.json").json()
+        assert manifest["songs"] == ["song_0.json"]  # still only one slot
+        assert content_after_first != content_after_second  # content replaced
+
+    @pytest.mark.skipif(
+        not shutil.which("ffmpeg"),
+        reason="ffmpeg not installed"
+    )
+    def test_upload_mp3(self, client, sine_wav):
+        from pydub import AudioSegment
+        import io as _io
+        seg = AudioSegment.from_file(_io.BytesIO(sine_wav), format="wav")
+        buf = _io.BytesIO()
+        seg.export(buf, format="mp3")
+        resp = client.post(
+            "/upload/song",
+            files={"file": ("song.mp3", buf.getvalue(), "audio/mpeg")},
+        )
+        assert resp.status_code == 201
 
 
 # ---------------------------------------------------------------------------
@@ -254,8 +298,8 @@ class TestDeleteFrame:
 
 
 class TestDeleteSong:
-    def test_delete_song(self, client, tmp_path):
-        _upload_song(client)
+    def test_delete_song(self, client, tmp_path, sine_wav):
+        _upload_wav(client, sine_wav)
         resp = client.delete("/songs/song_0")
         assert resp.status_code == 204
         assert not (tmp_path / "songs" / "song_0.json").exists()
@@ -287,8 +331,8 @@ class TestETag:
         etag2 = client.get("/frames/frame_0.bin").headers["etag"]
         assert etag1 == etag2
 
-    def test_etag_song(self, client):
-        _upload_song(client)
+    def test_etag_song(self, client, sine_wav):
+        _upload_wav(client, sine_wav)
         resp = client.get("/songs/song_0.json")
         assert resp.status_code == 200
         etag = resp.headers.get("etag", "")
@@ -308,7 +352,8 @@ class TestPathTraversal:
         assert resp.status_code == 422
 
     def test_path_traversal_dotdot_rejected(self, client):
-        # URL-encoded ../ in path should be rejected with 404 or 422
+        # %2F causes Starlette to route-normalize the path out of /frames/ entirely → 404.
+        # 422 would only fire if the pattern validator ran; both responses confirm no traversal.
         resp = client.get("/frames/..%2Fetc%2Fpasswd.bin")
         assert resp.status_code in (404, 422)
 
