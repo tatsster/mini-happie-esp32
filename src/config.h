@@ -1,10 +1,8 @@
 #pragma once
 
 // ── Server URL ──────────────────────────────────────────────────────────────
-// Edit this to switch between Cloudflare HTTPS and Caddy plain HTTP:
-//   Cloudflare (HTTPS):  "https://your-tunnel.trycloudflare.com"
-//   Caddy (HTTP):        "http://192.168.1.x:8080"
-#define SERVER_URL "https://your-tunnel.trycloudflare.com"
+// Edit this to your manager web server with HTTP/HTTPS:
+#define SERVER_URL "https://happie.liftlab.dev"
 
 // ── WiFi ────────────────────────────────────────────────────────────────────
 #define WIFI_AP_NAME    "MiniHappie-Setup"  // captive portal AP SSID

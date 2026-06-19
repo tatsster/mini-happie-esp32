@@ -1,6 +1,6 @@
 # Name,    Type, SubType,  Offset,   Size,     Flags
 # Custom no_ota.csv for Mini Happie (ESP32 DevKit V1, 4MB flash)
-# Derived from espressif/arduino-esp32 tools/partitions/no_ota.csv
+# Derived from espressif/arduino-esp32/tools/partitions/no_ota.csv
 # Changes: app0 trimmed to 1920KB (upstream uses 3072KB), spiffs expanded to 2048KB
 nvs,       data, nvs,      0x9000,   0x5000,
 otadata,   data, ota,      0xe000,   0x2000,
