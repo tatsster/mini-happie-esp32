@@ -3,6 +3,8 @@
 
 #include "cake_frames.h"
 #include "rainyhearts_font.h"
+#include <LittleFS.h>
+#include "config.h"
 
 constexpr uint8_t PIN_BUTTON = 14;
 constexpr uint8_t PIN_BOOT_BTN = 0;  // onboard BOOT button, works without wiring
@@ -60,6 +62,15 @@ void countdown() {
 
 void setup() {
     Serial.begin(115200);
+
+    if (!LittleFS.begin(true)) {
+        Serial.println("LittleFS mount failed — restarting");
+        Serial.flush();
+        ESP.restart();
+    }
+    Serial.println("LittleFS mounted");
+    // Optional: Serial.printf("LittleFS: %u KB used / %u KB total\n",
+    //     LittleFS.usedBytes() / 1024, LittleFS.totalBytes() / 1024);
 
     pinMode(PIN_BUTTON, INPUT_PULLUP);
     pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
