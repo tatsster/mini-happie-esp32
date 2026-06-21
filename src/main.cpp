@@ -259,13 +259,18 @@ void syncAssets(JsonArray frames, JsonArray songs) {
     // Step 2: signal download phase
     g_syncState = SYNC_DOWNLOADING;
 
+    // WR-03: track success/fail counts for logging
+    int succeeded = 0;
+    int failed = 0;
+
     // Step 3: download frames
     for (JsonVariant name : frames) {
         String fname = name.as<String>();
         String finalPath = "/frames/" + fname;
         String tmpPath   = "/tmp_" + fname;
         String url       = String(SERVER_URL) + "/frames/" + fname;
-        downloadIfChanged(url.c_str(), finalPath.c_str(), tmpPath.c_str(), fname.c_str());
+        bool ok = downloadIfChanged(url.c_str(), finalPath.c_str(), tmpPath.c_str(), fname.c_str());
+        if (ok) { succeeded++; } else { failed++; }
         vTaskDelay(10);  // yield between assets
     }
 
@@ -275,14 +280,16 @@ void syncAssets(JsonArray frames, JsonArray songs) {
         String finalPath = "/songs/" + sname;
         String tmpPath   = "/tmp_" + sname;
         String url       = String(SERVER_URL) + "/songs/" + sname;
-        downloadIfChanged(url.c_str(), finalPath.c_str(), tmpPath.c_str(), sname.c_str());
+        bool ok = downloadIfChanged(url.c_str(), finalPath.c_str(), tmpPath.c_str(), sname.c_str());
+        if (ok) { succeeded++; } else { failed++; }
         vTaskDelay(10);
     }
 
-    // Steps 5-7: signal completion
+    // Steps 5-7: signal completion (WR-03: log success/fail counts)
+    // g_assetsReady always set true: Phase 8 PROGMEM playback does not require LittleFS assets
     g_assetsReady = true;
     g_syncState = SYNC_DONE;
-    Serial.println("[sync] done — assetsReady");
+    Serial.printf("[sync] done — assetsReady (downloaded %d, skipped/failed %d)\n", succeeded, failed);
 }
 
 void syncManifest() {
