@@ -141,8 +141,9 @@ bool downloadIfChanged(const char* url, const char* finalPath, const char* tmpPa
             }
         }
 
-        // Step 8: get Content-Length
+        // Step 8: get Content-Length (-1 if server omits header)
         int contentLength = http.getSize();
+        bool lengthKnown = (contentLength >= 0);  // CR-02: handle unknown-length streaming
 
         // Step 9: get stream pointer
         WiFiClient* stream = http.getStreamPtr();
@@ -163,16 +164,28 @@ bool downloadIfChanged(const char* url, const char* finalPath, const char* tmpPa
         }
 
         // Step 12-13: stream download in 512-byte chunks; yield to IDLE0 between chunks
+        // CR-02: loop until disconnected when length unknown; WR-01: break on 10s stall
         uint8_t buf[512];
         int written = 0;
-        while (http.connected() && written < contentLength) {
+        bool writeError = false;
+        unsigned long lastProgress = millis();
+        while (http.connected() && (!lengthKnown || written < contentLength)) {
             int avail = stream->available();
             if (avail > 0) {
                 int toRead = min(avail, (int)sizeof(buf));
                 int n = stream->readBytes(buf, toRead);
-                tmp.write(buf, n);
+                size_t actual = tmp.write(buf, n);  // WR-02: check write return value
+                if ((int)actual != n) {
+                    writeError = true;
+                    break;
+                }
                 written += n;
+                lastProgress = millis();
             } else {
+                if (millis() - lastProgress > 10000UL) {  // WR-01: 10s no-progress timeout
+                    Serial.printf("[sync] %s: stalled\n", nvsKey);
+                    break;
+                }
                 vTaskDelay(1);  // yield to IDLE0 — prevents WDT timeout (D-26)
             }
         }
@@ -180,8 +193,18 @@ bool downloadIfChanged(const char* url, const char* finalPath, const char* tmpPa
         // Step 14: close temp file
         tmp.close();
 
-        // Step 15: integrity check — only remove tmpPath on failure, NOT finalPath (D-13)
-        if (written != contentLength) {
+        // WR-02: write error (fs full?) — clean up and retry/fail
+        if (writeError) {
+            Serial.printf("[sync] %s: write error (fs full?)\n", nvsKey);
+            LittleFS.remove(tmpPath);
+            http.end();
+            if (attempt == 0) { vTaskDelay(2000 / portTICK_PERIOD_MS); continue; }
+            else { return false; }
+        }
+
+        // Step 15: integrity check — only when Content-Length was declared (CR-02)
+        // Only remove tmpPath on failure, NOT finalPath (D-13)
+        if (lengthKnown && written != contentLength) {
             Serial.printf("[sync] %s: truncated %d/%d attempt %d\n", nvsKey, written, contentLength, attempt);
             LittleFS.remove(tmpPath);
             http.end();
