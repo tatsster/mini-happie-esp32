@@ -3,10 +3,12 @@
 
 #include "cake_frames.h"
 #include "rainyhearts_font.h"
+#include <FS.h>
 #include <LittleFS.h>
 #include "config.h"
 #include <WiFiManager.h>
 #include <HTTPClient.h>
+#include <Preferences.h>
 #include <ArduinoJson.h>
 
 constexpr uint8_t PIN_BUZZER = 25;
@@ -94,14 +96,163 @@ bool connectWiFi() {
     }
 }
 
-void syncManifest() {
-    // D-01/D-02: Show syncing screen before blocking HTTP call
-    tft.fillScreen(TFT_NAVY);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextFont(2);
-    tft.drawString("Syncing...", 120, 160);
+bool downloadIfChanged(const char* url, const char* finalPath, const char* tmpPath, const char* nvsKey) {
+    for (int attempt = 0; attempt < 2; attempt++) {
+        // Step 1: read stored ETag from NVS
+        Preferences prefs;
+        prefs.begin(NVS_ETAG_NS, true);  // read-only
+        String storedETag = prefs.getString(nvsKey, "");
+        prefs.end();
 
+        // Step 2: set up HTTPClient
+        HTTPClient http;
+        http.begin(url);
+        http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+        http.useHTTP10(true);
+
+        // Step 3: send If-None-Match if we have a cached ETag
+        if (storedETag.length() > 0) {
+            http.addHeader("If-None-Match", storedETag);
+        }
+
+        // Step 4: register ETag response header collection — MUST be before GET()
+        const char* headerKeys[] = {"ETag"};
+        http.collectHeaders(headerKeys, 1);
+
+        // Step 5: issue request
+        int code = http.GET();
+
+        // Step 6: 304 — nothing changed, skip download
+        if (code == 304) {
+            Serial.printf("[sync] %s: 304 skipped\n", nvsKey);
+            http.end();
+            return false;
+        }
+
+        // Step 7: non-200 failure
+        if (code != 200) {
+            Serial.printf("[sync] %s: attempt %d error %d\n", nvsKey, attempt, code);
+            http.end();
+            if (attempt == 0) {
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
+                continue;
+            } else {
+                return false;
+            }
+        }
+
+        // Step 8: get Content-Length
+        int contentLength = http.getSize();
+
+        // Step 9: get stream pointer
+        WiFiClient* stream = http.getStreamPtr();
+
+        // Step 10: open temp file for writing
+        fs::File tmp = LittleFS.open(tmpPath, FILE_WRITE, true);
+
+        // Step 11: bail if file open failed
+        if (!tmp) {
+            Serial.printf("[sync] %s: failed to open tmp file\n", nvsKey);
+            http.end();
+            if (attempt == 0) {
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
+                continue;
+            } else {
+                return false;
+            }
+        }
+
+        // Step 12-13: stream download in 512-byte chunks; yield to IDLE0 between chunks
+        uint8_t buf[512];
+        int written = 0;
+        while (http.connected() && written < contentLength) {
+            int avail = stream->available();
+            if (avail > 0) {
+                int toRead = min(avail, (int)sizeof(buf));
+                int n = stream->readBytes(buf, toRead);
+                tmp.write(buf, n);
+                written += n;
+            } else {
+                vTaskDelay(1);  // yield to IDLE0 — prevents WDT timeout (D-26)
+            }
+        }
+
+        // Step 14: close temp file
+        tmp.close();
+
+        // Step 15: integrity check — only remove tmpPath on failure, NOT finalPath (D-13)
+        if (written != contentLength) {
+            Serial.printf("[sync] %s: truncated %d/%d attempt %d\n", nvsKey, written, contentLength, attempt);
+            LittleFS.remove(tmpPath);
+            http.end();
+            if (attempt == 0) {
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
+                continue;
+            } else {
+                return false;
+            }
+        }
+
+        // Step 16: read ETag response header before http.end()
+        String serverETag = http.header("ETag");
+        http.end();
+
+        // Step 17: atomic replacement — remove existing then rename tmp (D-12)
+        LittleFS.remove(finalPath);
+        LittleFS.rename(tmpPath, finalPath);
+
+        // Step 18: persist new ETag to NVS only after successful write (integrity passed)
+        if (serverETag.length() > 0) {
+            Preferences prefs2;
+            prefs2.begin(NVS_ETAG_NS, false);  // read-write
+            prefs2.putString(nvsKey, serverETag);
+            prefs2.end();
+        }
+
+        // Step 19: log success
+        Serial.printf("[sync] %s: 200 downloaded %d bytes\n", nvsKey, written);
+        return true;
+    }
+    // Fallthrough: both attempts failed; finalPath left untouched if previously existed (D-13)
+    return false;
+}
+
+void syncAssets(JsonArray frames, JsonArray songs) {
+    // Step 1: ensure directories exist (no-op if already present)
+    LittleFS.mkdir("/frames");
+    LittleFS.mkdir("/songs");
+
+    // Step 2: signal download phase
+    g_syncState = SYNC_DOWNLOADING;
+
+    // Step 3: download frames
+    for (JsonVariant name : frames) {
+        String fname = name.as<String>();
+        String finalPath = "/frames/" + fname;
+        String tmpPath   = "/tmp_" + fname;
+        String url       = String(SERVER_URL) + "/frames/" + fname;
+        downloadIfChanged(url.c_str(), finalPath.c_str(), tmpPath.c_str(), fname.c_str());
+        vTaskDelay(10);  // yield between assets
+    }
+
+    // Step 4: download songs
+    for (JsonVariant name : songs) {
+        String sname    = name.as<String>();
+        String finalPath = "/songs/" + sname;
+        String tmpPath   = "/tmp_" + sname;
+        String url       = String(SERVER_URL) + "/songs/" + sname;
+        downloadIfChanged(url.c_str(), finalPath.c_str(), tmpPath.c_str(), sname.c_str());
+        vTaskDelay(10);
+    }
+
+    // Steps 5-7: signal completion
+    g_assetsReady = true;
+    g_syncState = SYNC_DONE;
+    Serial.println("[sync] done — assetsReady");
+}
+
+void syncManifest() {
+    // Runs on core 0 — no tft.* calls (D-02); status shown by main core via g_syncState
     String url = String(SERVER_URL) + "/manifest.json";
 
     // begin(String url): auto-selects TLSTraits+setInsecure() for https://
@@ -115,7 +266,8 @@ void syncManifest() {
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("Manifest fetch failed: %d\n", httpCode);
         http.end();
-        return;  // D-04: silent fallback
+        g_syncState = SYNC_FAILED;  // D-15: HTTP error → SYNC_FAILED
+        return;
     }
 
     JsonDocument doc;  // v7 API — no capacity template, heap-allocated elastically
@@ -124,14 +276,14 @@ void syncManifest() {
 
     if (err) {
         Serial.printf("Manifest parse error: %s\n", err.c_str());
-        return;  // D-04: silent fallback
+        g_syncState = SYNC_FAILED;  // D-15: JSON parse error → SYNC_FAILED
+        return;
     }
 
-    // D-03: log frame and song counts on successful parse
     JsonArray frames = doc["frames"].as<JsonArray>();
     JsonArray songs  = doc["songs"].as<JsonArray>();
-    Serial.printf("Manifest: %d frames, %d songs\n", frames.size(), songs.size());
-    // Phase 8 will use frames/songs arrays for asset download
+    Serial.printf("[sync] manifest: %d frames, %d songs\n", frames.size(), songs.size());
+    syncAssets(frames, songs);
 }
 
 void setup() {
