@@ -6,9 +6,9 @@
 #include <LittleFS.h>
 #include "config.h"
 #include <WiFiManager.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 
-constexpr uint8_t PIN_BUTTON = 14;
-constexpr uint8_t PIN_BOOT_BTN = 0;  // onboard BOOT button, works without wiring
 constexpr uint8_t PIN_BUZZER = 25;
 
 TFT_eSPI tft = TFT_eSPI();
@@ -115,10 +115,50 @@ bool connectWiFi() {
         tft.setTextDatum(MC_DATUM);
         tft.setTextFont(2);
         tft.drawString("Offline mode", 120, 148);
-        tft.drawString("Press button to play", 120, 172);
+        tft.drawString("Playing from cache...", 120, 172);
         Serial.println("WiFi offline - portal timed out");
         return false;
     }
+}
+
+void syncManifest() {
+    // D-01/D-02: Show syncing screen before blocking HTTP call
+    tft.fillScreen(TFT_NAVY);
+    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(2);
+    tft.drawString("Syncing...", 120, 160);
+
+    String url = String(SERVER_URL) + "/manifest.json";
+
+    // begin(String url): auto-selects TLSTraits+setInsecure() for https://
+    // or plain TransportTraits for http:// — handles both SERVER_URL forms
+    HTTPClient http;
+    http.begin(url);
+    http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+    http.useHTTP10(true);  // disable chunked transfer; enables direct stream parsing
+
+    int httpCode = http.GET();
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("Manifest fetch failed: %d\n", httpCode);
+        http.end();
+        return;  // D-04: silent fallback
+    }
+
+    JsonDocument doc;  // v7 API — no capacity template, heap-allocated elastically
+    DeserializationError err = deserializeJson(doc, http.getStream());
+    http.end();
+
+    if (err) {
+        Serial.printf("Manifest parse error: %s\n", err.c_str());
+        return;  // D-04: silent fallback
+    }
+
+    // D-03: log frame and song counts on successful parse
+    JsonArray frames = doc["frames"].as<JsonArray>();
+    JsonArray songs  = doc["songs"].as<JsonArray>();
+    Serial.printf("Manifest: %d frames, %d songs\n", frames.size(), songs.size());
+    // Phase 8 will use frames/songs arrays for asset download
 }
 
 void setup() {
@@ -133,8 +173,6 @@ void setup() {
     // Optional: Serial.printf("LittleFS: %u KB used / %u KB total\n",
     //     LittleFS.usedBytes() / 1024, LittleFS.totalBytes() / 1024);
 
-    pinMode(PIN_BUTTON, INPUT_PULLUP);
-    pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
     pinMode(PIN_BUZZER, OUTPUT);
 
     tft.init();
@@ -147,24 +185,13 @@ void setup() {
         // Sync clock before any HTTPS — mbedTLS validates cert notBefore/notAfter
         // against system time, which is epoch-zero at cold boot without NTP.
         configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-
-        // Phase 7: manifest fetch + asset sync goes here
-        // if (wifiOk) { syncAssets(); }
-
-        drawCake(0);
+        syncManifest();
     }
-    // If !wifiOk: "Offline mode" screen persists; do NOT call drawCake(0)
+    countdown();
+    playMelody();
+    drawCake(0);
 }
 
 void loop() {
-    static bool lastButton = HIGH;
-    bool now = digitalRead(PIN_BUTTON) && digitalRead(PIN_BOOT_BTN);
-
-    if (lastButton == HIGH && now == LOW) {
-        delay(20);
-        countdown();
-        playMelody();
-        drawCake(0);  // back to idle smile
-    }
-    lastButton = now;
+    // Auto-play is driven from setup(). Nothing to poll.
 }
