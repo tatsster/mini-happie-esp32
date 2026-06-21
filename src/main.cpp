@@ -199,9 +199,20 @@ bool downloadIfChanged(const char* url, const char* finalPath, const char* tmpPa
 
         // Step 17: atomic replacement — remove existing then rename tmp (D-12)
         LittleFS.remove(finalPath);
-        LittleFS.rename(tmpPath, finalPath);
+        bool renamed = LittleFS.rename(tmpPath, finalPath);
+        if (!renamed) {
+            Serial.printf("[sync] %s: rename failed, keeping old ETag\n", nvsKey);
+            // tmpPath may or may not still exist; attempt cleanup
+            LittleFS.remove(tmpPath);
+            if (attempt == 0) {
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
+                continue;
+            } else {
+                return false;
+            }
+        }
 
-        // Step 18: persist new ETag to NVS only after successful write (integrity passed)
+        // Step 18: persist new ETag only after confirmed rename (D-12)
         if (serverETag.length() > 0) {
             Preferences prefs2;
             prefs2.begin(NVS_ETAG_NS, false);  // read-write
