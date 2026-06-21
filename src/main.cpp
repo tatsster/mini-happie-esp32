@@ -117,6 +117,7 @@ bool connectWiFi() {
         tft.drawString("Offline mode", 120, 148);
         tft.drawString("Playing from cache...", 120, 172);
         Serial.println("WiFi offline - portal timed out");
+        delay(1500);
         return false;
     }
 }

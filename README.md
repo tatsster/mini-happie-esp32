@@ -84,9 +84,10 @@ Follow the Hardware table above. Tips:
 
 If colors look wrong after first flash:
 
-- **Inverted colors** — remove `-DTFT_INVERSION_ON` from `platformio.ini`
-- **Byte-order garbage** — `tft.setSwapBytes(true)` is already set; generated arrays are big-endian RGB565
-- **Portrait vs landscape** — change `tft.setRotation(0)` (0–3)
+- **Warm colors look blue / blue fills appear red** — your ST7789 panel uses BGR channel order. Add `-DTFT_RGB_ORDER=TFT_BGR` to the `build_flags` block in `platformio.ini`. This is the most common issue with ST7789 panels; it affects both solid fills (`fillScreen`) and pushed images.
+- **All colors inverted / washed out** — toggle `-DTFT_INVERSION_ON` in `platformio.ini` (uncomment to enable, comment out to disable). Some ST7789 panels need this alongside `TFT_BGR`; try both combinations.
+- **Byte-order garbage on images only** — `tft.setSwapBytes(true)` is already set in the firmware; generated RGB565 arrays are big-endian. This should not need changing.
+- **Portrait vs landscape** — change `tft.setRotation(2)` (0–3) in `src/main.cpp`.
 
 ## Quick Start — Web Server (Mini Happie Manager)
 
@@ -151,7 +152,8 @@ Upload note: CP2102-based boards have reliable auto-reset — no need to hold BO
 | Upload: `No serial data received` | Charge-only USB cable or flaky reset | Swap cable; try manual BOOT hold during upload |
 | Screen totally dark | No power to VCC/BLK | Verify VCC + BLK on 3V3 rail, GND on − rail |
 | White screen, flickers when touched | Loose/cold joint | Reseat / reflow the pin |
-| Colors inverted | ST7789 panel variant | Toggle `-DTFT_INVERSION_ON` in `platformio.ini` |
+| Cake image looks blue/cold; navy fills appear red | ST7789 BGR panel | Add `-DTFT_RGB_ORDER=TFT_BGR` to `build_flags` in `platformio.ini` |
+| Colors inverted / washed out | ST7789 panel variant | Toggle `-DTFT_INVERSION_ON` in `platformio.ini`; try with and without `TFT_BGR` |
 | Image colors look like static | Byte order | `tft.setSwapBytes(true)` (already set) |
 | Buzzer plays one flat tone | Active buzzer | Replace with a **passive** piezo |
 | Stuck on "Connecting..." at boot | Saved credentials bad or first boot | Wait for portal AP, or hold BOOT 3s to reset WiFi creds |
