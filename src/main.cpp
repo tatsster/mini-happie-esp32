@@ -67,57 +67,29 @@ void countdown() {
     drawCake(3, "happy birthday!");
 }
 
+enum SyncState { SYNC_IDLE, SYNC_CONNECTING, SYNC_DOWNLOADING, SYNC_DONE, SYNC_FAILED };
+volatile SyncState g_syncState = SYNC_IDLE;
+volatile bool g_assetsReady = false;
+
 bool connectWiFi() {
-    // SCREEN 1: Connecting — drawn before the blocking autoConnect() call
-    tft.fillScreen(TFT_NAVY);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextFont(2);
-    tft.drawString("Connecting...", 120, 160);
     Serial.println("WiFi: connecting");
 
     WiFiManager wm;
     wm.setConfigPortalTimeout(WIFI_TIMEOUT_MS / 1000);  // seconds, not ms
 
-    // SCREEN 2: Portal active — drawn inside callback when AP comes up
+    // Portal active — no tft.* calls; sync task owns no TFT (D-02/D-09)
     wm.setAPCallback([](WiFiManager* myWM) {
-        tft.fillScreen(TFT_NAVY);
-        tft.setTextColor(TFT_WHITE, TFT_NAVY);
-        tft.setTextDatum(MC_DATUM);
-        tft.setTextFont(4);
-        tft.drawString("Setup WiFi:", 120, 130);
-        tft.setTextFont(2);  // reset — setTextFont is not sticky
-        tft.drawString(WIFI_AP_NAME, 120, 170);
-        tft.drawString("192.168.4.1", 120, 194);
+        g_syncState = SYNC_CONNECTING;
+        Serial.println("[sync] portal active");
     });
 
     bool ok = wm.autoConnect(WIFI_AP_NAME);
 
-    // Reinstate TFT state — WiFiManager's blocking loop leaves TFT_eSPI in an undefined state
-    tft.init();
-    tft.setRotation(2);
-    tft.setSwapBytes(true);
-
     if (ok) {
-        // SCREEN 3: Connected
-        tft.fillScreen(TFT_NAVY);
-        tft.setTextColor(TFT_WHITE, TFT_NAVY);
-        tft.setTextDatum(MC_DATUM);
-        tft.setTextFont(2);
-        tft.drawString("WiFi connected!", 120, 160);
         Serial.println("WiFi connected");
-        delay(1000);
         return true;
     } else {
-        // SCREEN 4: Offline mode (persistent; distinct dark-grey background)
-        tft.fillScreen(TFT_DARKGREY);
-        tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
-        tft.setTextDatum(MC_DATUM);
-        tft.setTextFont(2);
-        tft.drawString("Offline mode", 120, 148);
-        tft.drawString("Playing from cache...", 120, 172);
-        Serial.println("WiFi offline - portal timed out");
-        delay(1500);
+        Serial.println("WiFi offline...");
         return false;
     }
 }
