@@ -3,10 +3,12 @@
 
 #include "cake_frames.h"
 #include "rainyhearts_font.h"
+#include <FS.h>
 #include <LittleFS.h>
 #include "config.h"
 #include <WiFiManager.h>
 #include <HTTPClient.h>
+#include <Preferences.h>
 #include <ArduinoJson.h>
 
 constexpr uint8_t PIN_BUZZER = 25;
@@ -67,69 +69,190 @@ void countdown() {
     drawCake(3, "happy birthday!");
 }
 
+enum SyncState { SYNC_IDLE, SYNC_CONNECTING, SYNC_DOWNLOADING, SYNC_DONE, SYNC_FAILED };
+volatile SyncState g_syncState = SYNC_IDLE;
+volatile bool g_assetsReady = false;
+
 bool connectWiFi() {
-    // SCREEN 1: Connecting — drawn before the blocking autoConnect() call
-    tft.fillScreen(TFT_NAVY);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextFont(2);
-    tft.drawString("Connecting...", 120, 160);
     Serial.println("WiFi: connecting");
 
     WiFiManager wm;
     wm.setConfigPortalTimeout(WIFI_TIMEOUT_MS / 1000);  // seconds, not ms
 
-    // SCREEN 2: Portal active — drawn inside callback when AP comes up
+    // Portal active — no tft.* calls; sync task owns no TFT (D-02/D-09)
     wm.setAPCallback([](WiFiManager* myWM) {
-        tft.fillScreen(TFT_NAVY);
-        tft.setTextColor(TFT_WHITE, TFT_NAVY);
-        tft.setTextDatum(MC_DATUM);
-        tft.setTextFont(4);
-        tft.drawString("Setup WiFi:", 120, 130);
-        tft.setTextFont(2);  // reset — setTextFont is not sticky
-        tft.drawString(WIFI_AP_NAME, 120, 170);
-        tft.drawString("192.168.4.1", 120, 194);
+        g_syncState = SYNC_CONNECTING;
+        Serial.println("[sync] portal active");
     });
 
     bool ok = wm.autoConnect(WIFI_AP_NAME);
 
-    // Reinstate TFT state — WiFiManager's blocking loop leaves TFT_eSPI in an undefined state
-    tft.init();
-    tft.setRotation(2);
-    tft.setSwapBytes(true);
-
     if (ok) {
-        // SCREEN 3: Connected
-        tft.fillScreen(TFT_NAVY);
-        tft.setTextColor(TFT_WHITE, TFT_NAVY);
-        tft.setTextDatum(MC_DATUM);
-        tft.setTextFont(2);
-        tft.drawString("WiFi connected!", 120, 160);
         Serial.println("WiFi connected");
-        delay(1000);
         return true;
     } else {
-        // SCREEN 4: Offline mode (persistent; distinct dark-grey background)
-        tft.fillScreen(TFT_DARKGREY);
-        tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
-        tft.setTextDatum(MC_DATUM);
-        tft.setTextFont(2);
-        tft.drawString("Offline mode", 120, 148);
-        tft.drawString("Playing from cache...", 120, 172);
-        Serial.println("WiFi offline - portal timed out");
-        delay(1500);
+        Serial.println("WiFi offline...");
         return false;
     }
 }
 
-void syncManifest() {
-    // D-01/D-02: Show syncing screen before blocking HTTP call
-    tft.fillScreen(TFT_NAVY);
-    tft.setTextColor(TFT_WHITE, TFT_NAVY);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextFont(2);
-    tft.drawString("Syncing...", 120, 160);
+bool downloadIfChanged(const char* url, const char* finalPath, const char* tmpPath, const char* nvsKey) {
+    for (int attempt = 0; attempt < 2; attempt++) {
+        // Step 1: read stored ETag from NVS
+        Preferences prefs;
+        prefs.begin(NVS_ETAG_NS, true);  // read-only
+        String storedETag = prefs.getString(nvsKey, "");
+        prefs.end();
 
+        // Step 2: set up HTTPClient
+        HTTPClient http;
+        http.begin(url);
+        http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+        http.useHTTP10(true);
+
+        // Step 3: send If-None-Match if we have a cached ETag
+        if (storedETag.length() > 0) {
+            http.addHeader("If-None-Match", storedETag);
+        }
+
+        // Step 4: register ETag response header collection — MUST be before GET()
+        const char* headerKeys[] = {"ETag"};
+        http.collectHeaders(headerKeys, 1);
+
+        // Step 5: issue request
+        int code = http.GET();
+
+        // Step 6: 304 — nothing changed, skip download
+        if (code == 304) {
+            Serial.printf("[sync] %s: 304 skipped\n", nvsKey);
+            http.end();
+            return false;
+        }
+
+        // Step 7: non-200 failure
+        if (code != 200) {
+            Serial.printf("[sync] %s: attempt %d error %d\n", nvsKey, attempt, code);
+            http.end();
+            if (attempt == 0) {
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
+                continue;
+            } else {
+                return false;
+            }
+        }
+
+        // Step 8: get Content-Length
+        int contentLength = http.getSize();
+
+        // Step 9: get stream pointer
+        WiFiClient* stream = http.getStreamPtr();
+
+        // Step 10: open temp file for writing
+        fs::File tmp = LittleFS.open(tmpPath, FILE_WRITE, true);
+
+        // Step 11: bail if file open failed
+        if (!tmp) {
+            Serial.printf("[sync] %s: failed to open tmp file\n", nvsKey);
+            http.end();
+            if (attempt == 0) {
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
+                continue;
+            } else {
+                return false;
+            }
+        }
+
+        // Step 12-13: stream download in 512-byte chunks; yield to IDLE0 between chunks
+        uint8_t buf[512];
+        int written = 0;
+        while (http.connected() && written < contentLength) {
+            int avail = stream->available();
+            if (avail > 0) {
+                int toRead = min(avail, (int)sizeof(buf));
+                int n = stream->readBytes(buf, toRead);
+                tmp.write(buf, n);
+                written += n;
+            } else {
+                vTaskDelay(1);  // yield to IDLE0 — prevents WDT timeout (D-26)
+            }
+        }
+
+        // Step 14: close temp file
+        tmp.close();
+
+        // Step 15: integrity check — only remove tmpPath on failure, NOT finalPath (D-13)
+        if (written != contentLength) {
+            Serial.printf("[sync] %s: truncated %d/%d attempt %d\n", nvsKey, written, contentLength, attempt);
+            LittleFS.remove(tmpPath);
+            http.end();
+            if (attempt == 0) {
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
+                continue;
+            } else {
+                return false;
+            }
+        }
+
+        // Step 16: read ETag response header before http.end()
+        String serverETag = http.header("ETag");
+        http.end();
+
+        // Step 17: atomic replacement — remove existing then rename tmp (D-12)
+        LittleFS.remove(finalPath);
+        LittleFS.rename(tmpPath, finalPath);
+
+        // Step 18: persist new ETag to NVS only after successful write (integrity passed)
+        if (serverETag.length() > 0) {
+            Preferences prefs2;
+            prefs2.begin(NVS_ETAG_NS, false);  // read-write
+            prefs2.putString(nvsKey, serverETag);
+            prefs2.end();
+        }
+
+        // Step 19: log success
+        Serial.printf("[sync] %s: 200 downloaded %d bytes\n", nvsKey, written);
+        return true;
+    }
+    // Fallthrough: both attempts failed; finalPath left untouched if previously existed (D-13)
+    return false;
+}
+
+void syncAssets(JsonArray frames, JsonArray songs) {
+    // Step 1: ensure directories exist (no-op if already present)
+    LittleFS.mkdir("/frames");
+    LittleFS.mkdir("/songs");
+
+    // Step 2: signal download phase
+    g_syncState = SYNC_DOWNLOADING;
+
+    // Step 3: download frames
+    for (JsonVariant name : frames) {
+        String fname = name.as<String>();
+        String finalPath = "/frames/" + fname;
+        String tmpPath   = "/tmp_" + fname;
+        String url       = String(SERVER_URL) + "/frames/" + fname;
+        downloadIfChanged(url.c_str(), finalPath.c_str(), tmpPath.c_str(), fname.c_str());
+        vTaskDelay(10);  // yield between assets
+    }
+
+    // Step 4: download songs
+    for (JsonVariant name : songs) {
+        String sname    = name.as<String>();
+        String finalPath = "/songs/" + sname;
+        String tmpPath   = "/tmp_" + sname;
+        String url       = String(SERVER_URL) + "/songs/" + sname;
+        downloadIfChanged(url.c_str(), finalPath.c_str(), tmpPath.c_str(), sname.c_str());
+        vTaskDelay(10);
+    }
+
+    // Steps 5-7: signal completion
+    g_assetsReady = true;
+    g_syncState = SYNC_DONE;
+    Serial.println("[sync] done — assetsReady");
+}
+
+void syncManifest() {
+    // Runs on core 0 — no tft.* calls (D-02); status shown by main core via g_syncState
     String url = String(SERVER_URL) + "/manifest.json";
 
     // begin(String url): auto-selects TLSTraits+setInsecure() for https://
@@ -143,7 +266,8 @@ void syncManifest() {
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("Manifest fetch failed: %d\n", httpCode);
         http.end();
-        return;  // D-04: silent fallback
+        g_syncState = SYNC_FAILED;  // D-15: HTTP error → SYNC_FAILED
+        return;
     }
 
     JsonDocument doc;  // v7 API — no capacity template, heap-allocated elastically
@@ -152,14 +276,45 @@ void syncManifest() {
 
     if (err) {
         Serial.printf("Manifest parse error: %s\n", err.c_str());
-        return;  // D-04: silent fallback
+        g_syncState = SYNC_FAILED;  // D-15: JSON parse error → SYNC_FAILED
+        return;
     }
 
-    // D-03: log frame and song counts on successful parse
     JsonArray frames = doc["frames"].as<JsonArray>();
     JsonArray songs  = doc["songs"].as<JsonArray>();
-    Serial.printf("Manifest: %d frames, %d songs\n", frames.size(), songs.size());
-    // Phase 8 will use frames/songs arrays for asset download
+    Serial.printf("[sync] manifest: %d frames, %d songs\n", frames.size(), songs.size());
+    syncAssets(frames, songs);
+}
+
+// TFT status helper — main core only; never called from sync task (D-02/D-08)
+void showSyncStatus(const char* msg) {
+    tft.fillScreen(TFT_NAVY);
+    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(2);
+    tft.drawString(msg, 120, 160);
+}
+
+// FreeRTOS task pinned to core 0: WiFi → NTP → manifest → asset downloads (D-01)
+void syncTask(void* param) {
+    g_syncState = SYNC_CONNECTING;
+    Serial.println("[sync] task started on core 0");
+
+    bool wifiOk = connectWiFi();
+    if (!wifiOk) {
+        g_syncState = SYNC_FAILED;
+        Serial.println("[sync] wifi failed");
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    // NTP sync after WiFi — setInsecure() makes this optional but good practice
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+    // Fetch manifest + download assets (sets g_assetsReady and g_syncState internally)
+    syncManifest();
+
+    vTaskDelete(nullptr);
 }
 
 void setup() {
@@ -171,26 +326,44 @@ void setup() {
     } else {
         Serial.println("LittleFS mounted");
     }
-    // Optional: Serial.printf("LittleFS: %u KB used / %u KB total\n",
-    //     LittleFS.usedBytes() / 1024, LittleFS.totalBytes() / 1024);
 
     pinMode(PIN_BUZZER, OUTPUT);
 
+    // Authoritative TFT init — must complete before task launch (D-03)
     tft.init();
     tft.setRotation(2);
     tft.setSwapBytes(true);  // image data is big-endian RGB565
 
-    bool wifiOk = connectWiFi();
+    // Launch sync task on core 0; main core continues immediately (D-01)
+    xTaskCreatePinnedToCore(syncTask, "sync", 16384, nullptr, 1, nullptr, 0);
 
-    if (wifiOk) {
-        // Sync clock before any HTTPS — mbedTLS validates cert notBefore/notAfter
-        // against system time, which is epoch-zero at cold boot without NTP.
-        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-        syncManifest();
+    bool hasAssets = LittleFS.exists("/frames/frame_0.bin");
+
+    if (hasAssets) {
+        // Assets cached — play from PROGMEM immediately; Phase 9 will use LittleFS
+        countdown();
+        playMelody();
+        drawCake(0);
+    } else {
+        // First boot: no cached assets — show status until sync completes or fails (D-07/D-10)
+        while (!g_assetsReady) {
+            SyncState state = g_syncState;
+            if (state == SYNC_CONNECTING || state == SYNC_IDLE) {
+                showSyncStatus("Connecting...");
+            } else if (state == SYNC_DOWNLOADING) {
+                showSyncStatus("Downloading...");
+            } else if (state == SYNC_FAILED) {
+                showSyncStatus("Sync failed");
+                delay(2000);
+                break;
+            }
+            delay(200);  // poll every 200ms
+        }
+        // Play from PROGMEM regardless of sync outcome (D-10 edge case handled above)
+        countdown();
+        playMelody();
+        drawCake(0);
     }
-    countdown();
-    playMelody();
-    drawCake(0);
 }
 
 void loop() {
