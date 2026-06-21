@@ -97,6 +97,14 @@ bool connectWiFi() {
 }
 
 bool downloadIfChanged(const char* url, const char* finalPath, const char* tmpPath, const char* nvsKey) {
+    // WR-04: NVS keys are limited to 15 chars (NVS_KEY_NAME_MAX_SIZE). Truncate with log.
+    char safeKey[16];
+    if (strlen(nvsKey) > 15) {
+        snprintf(safeKey, sizeof(safeKey), "%.15s", nvsKey);
+        Serial.printf("[sync] WARNING: NVS key '%s' exceeds 15 chars, truncated to '%s'\n", nvsKey, safeKey);
+        nvsKey = safeKey;
+    }
+
     for (int attempt = 0; attempt < 2; attempt++) {
         // Step 1: read stored ETag from NVS
         Preferences prefs;
