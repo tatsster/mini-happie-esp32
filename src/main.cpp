@@ -286,6 +286,37 @@ void syncManifest() {
     syncAssets(frames, songs);
 }
 
+// TFT status helper — main core only; never called from sync task (D-02/D-08)
+void showSyncStatus(const char* msg) {
+    tft.fillScreen(TFT_NAVY);
+    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(2);
+    tft.drawString(msg, 120, 160);
+}
+
+// FreeRTOS task pinned to core 0: WiFi → NTP → manifest → asset downloads (D-01)
+void syncTask(void* param) {
+    g_syncState = SYNC_CONNECTING;
+    Serial.println("[sync] task started on core 0");
+
+    bool wifiOk = connectWiFi();
+    if (!wifiOk) {
+        g_syncState = SYNC_FAILED;
+        Serial.println("[sync] wifi failed");
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    // NTP sync after WiFi — setInsecure() makes this optional but good practice
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+    // Fetch manifest + download assets (sets g_assetsReady and g_syncState internally)
+    syncManifest();
+
+    vTaskDelete(nullptr);
+}
+
 void setup() {
     Serial.begin(115200);
 
@@ -295,26 +326,44 @@ void setup() {
     } else {
         Serial.println("LittleFS mounted");
     }
-    // Optional: Serial.printf("LittleFS: %u KB used / %u KB total\n",
-    //     LittleFS.usedBytes() / 1024, LittleFS.totalBytes() / 1024);
 
     pinMode(PIN_BUZZER, OUTPUT);
 
+    // Authoritative TFT init — must complete before task launch (D-03)
     tft.init();
     tft.setRotation(2);
     tft.setSwapBytes(true);  // image data is big-endian RGB565
 
-    bool wifiOk = connectWiFi();
+    // Launch sync task on core 0; main core continues immediately (D-01)
+    xTaskCreatePinnedToCore(syncTask, "sync", 16384, nullptr, 1, nullptr, 0);
 
-    if (wifiOk) {
-        // Sync clock before any HTTPS — mbedTLS validates cert notBefore/notAfter
-        // against system time, which is epoch-zero at cold boot without NTP.
-        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-        syncManifest();
+    bool hasAssets = LittleFS.exists("/frames/frame_0.bin");
+
+    if (hasAssets) {
+        // Assets cached — play from PROGMEM immediately; Phase 9 will use LittleFS
+        countdown();
+        playMelody();
+        drawCake(0);
+    } else {
+        // First boot: no cached assets — show status until sync completes or fails (D-07/D-10)
+        while (!g_assetsReady) {
+            SyncState state = g_syncState;
+            if (state == SYNC_CONNECTING || state == SYNC_IDLE) {
+                showSyncStatus("Connecting...");
+            } else if (state == SYNC_DOWNLOADING) {
+                showSyncStatus("Downloading...");
+            } else if (state == SYNC_FAILED) {
+                showSyncStatus("Sync failed");
+                delay(2000);
+                break;
+            }
+            delay(200);  // poll every 200ms
+        }
+        // Play from PROGMEM regardless of sync outcome (D-10 edge case handled above)
+        countdown();
+        playMelody();
+        drawCake(0);
     }
-    countdown();
-    playMelody();
-    drawCake(0);
 }
 
 void loop() {
