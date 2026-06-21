@@ -6,6 +6,8 @@
 #include <LittleFS.h>
 #include "config.h"
 #include <WiFiManager.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 
 constexpr uint8_t PIN_BUTTON = 14;
 constexpr uint8_t PIN_BOOT_BTN = 0;  // onboard BOOT button, works without wiring
@@ -119,6 +121,46 @@ bool connectWiFi() {
         Serial.println("WiFi offline - portal timed out");
         return false;
     }
+}
+
+void syncManifest() {
+    // D-01/D-02: Show syncing screen before blocking HTTP call
+    tft.fillScreen(TFT_NAVY);
+    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(2);
+    tft.drawString("Syncing...", 120, 160);
+
+    String url = String(SERVER_URL) + "/manifest.json";
+
+    // begin(String url): auto-selects TLSTraits+setInsecure() for https://
+    // or plain TransportTraits for http:// — handles both SERVER_URL forms
+    HTTPClient http;
+    http.begin(url);
+    http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+    http.useHTTP10(true);  // disable chunked transfer; enables direct stream parsing
+
+    int httpCode = http.GET();
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("Manifest fetch failed: %d\n", httpCode);
+        http.end();
+        return;  // D-04: silent fallback
+    }
+
+    JsonDocument doc;  // v7 API — no capacity template, heap-allocated elastically
+    DeserializationError err = deserializeJson(doc, http.getStream());
+    http.end();
+
+    if (err) {
+        Serial.printf("Manifest parse error: %s\n", err.c_str());
+        return;  // D-04: silent fallback
+    }
+
+    // D-03: log frame and song counts on successful parse
+    JsonArray frames = doc["frames"].as<JsonArray>();
+    JsonArray songs  = doc["songs"].as<JsonArray>();
+    Serial.printf("Manifest: %d frames, %d songs\n", frames.size(), songs.size());
+    // Phase 8 will use frames/songs arrays for asset download
 }
 
 void setup() {
