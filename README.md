@@ -16,17 +16,19 @@ This project inherits its core idea from [cupidbity/happy-birthday-esp32](https:
 
 ## Hardware
 
-| Component  | ESP32 pin | Notes                      |
-|------------|-----------|----------------------------|
-| TFT CS     | GPIO5     | SPI chip select            |
-| TFT DC     | GPIO16    | data/command               |
-| TFT RST    | GPIO17    |                            |
-| TFT SCK    | GPIO18    | hardware SPI clock         |
-| TFT MOSI   | GPIO23    | hardware SPI MOSI          |
-| TFT VCC    | 3V3       | 3.3V logic                 |
-| TFT BLK    | 3V3       | backlight always-on        |
-| Buzzer +   | GPIO25    | passive piezo              |
-| Button     | GPIO14    | to GND, INPUT_PULLUP       |
+ESP32 Pin diagram reference: https://5.imimg.com/data5/SELLER/Doc/2025/4/501949387/EU/NR/MQ/1833510/nodemcu-esp32-cp2102-30pin.pdf
+
+| Component  | ESP32 pin      | Notes                      |
+|------------|----------------|----------------------------|
+| TFT CS     | GPIO5          | SPI chip select            |
+| TFT DC     | GPIO16 (RX2)   | data/command               |
+| TFT RES    | GPIO17 (TX2)   |                            |
+| TFT SCL    | GPIO18         | hardware SPI clock         |
+| TFT SDA    | GPIO23         | hardware SPI MOSI          |
+| TFT VDD    | 3V3            | 3.3V logic                 |
+| TFT BLK    | 3V3            | backlight always-on        |
+| Buzzer +   | GPIO25         | passive piezo              |
+| Button     | GPIO14         | to GND, INPUT_PULLUP       |
 
 All grounds tied together. ST7789 is write-only — no MISO connection needed.
 
@@ -59,7 +61,17 @@ pio device monitor
 
 Pin assignments and display driver settings live entirely in `platformio.ini` as `build_flags` — no `User_Setup.h` editing needed. PlatformIO installs `TFT_eSPI` automatically on first build.
 
-### 3. Wire it
+### 3. Connect to WiFi (first boot only)
+
+On first boot the TFT shows **"Setup WiFi:"** with an AP name and IP. On your phone:
+
+1. Join the `MiniHappie-Setup` WiFi network
+2. Open `192.168.4.1` in a browser (or wait for the captive portal redirect)
+3. Enter your home WiFi credentials and save
+
+Subsequent boots auto-connect — the portal never appears again unless credentials are erased. If no credentials are entered within 180 seconds, the device falls back to **Offline mode** and plays from cached assets on button press.
+
+### 4. Wire it
 
 Follow the Hardware table above. Tips:
 
@@ -68,7 +80,7 @@ Follow the Hardware table above. Tips:
 - Seat TFT pins firmly. A loose joint shows as a white screen that flickers when touched.
 - The passive buzzer has no polarity.
 
-### 4. Tune the display
+### 5. Tune the display
 
 If colors look wrong after first flash:
 
@@ -104,7 +116,7 @@ uvicorn server.main:app --port 8080 --reload
 | GET | `/songs/{name}.json` | Download a song as a JSON note array |
 | DELETE | `/songs/{name}` | Remove a song |
 
-Songs are managed directly on the server — there is no sheet music upload endpoint. Add songs by placing pre-converted JSON note arrays in `data/songs/` on the server.
+Upload songs as WAV or MP3 files via `POST /upload/song` — the server converts them to a `{freq, ms}` note array automatically. A `is_complex: true` flag in the response indicates polyphonic audio that may not play cleanly on the passive buzzer.
 
 Point `SERVER_URL` in `src/config.h` at your server before flashing:
 
@@ -142,7 +154,9 @@ Upload note: CP2102-based boards have reliable auto-reset — no need to hold BO
 | Colors inverted | ST7789 panel variant | Toggle `-DTFT_INVERSION_ON` in `platformio.ini` |
 | Image colors look like static | Byte order | `tft.setSwapBytes(true)` (already set) |
 | Buzzer plays one flat tone | Active buzzer | Replace with a **passive** piezo |
-| Nothing happens on power-up | Button-triggered by design | Press BOOT or GPIO14 button |
+| Stuck on "Connecting..." at boot | Saved credentials bad or first boot | Wait for portal AP, or hold BOOT 3s to reset WiFi creds |
+| No WiFi AP appears after "Connecting..." | Portal timeout waiting for you | Reflash to trigger first-boot flow again |
+| Nothing happens after WiFi connects | Button-triggered by design | Press BOOT or GPIO14 button to play |
 | Server: frame not updating | ETag cache | DELETE the old frame and re-upload |
 
 ## Project Layout

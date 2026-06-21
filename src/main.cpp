@@ -5,6 +5,7 @@
 #include "rainyhearts_font.h"
 #include <LittleFS.h>
 #include "config.h"
+#include <WiFiManager.h>
 
 constexpr uint8_t PIN_BUTTON = 14;
 constexpr uint8_t PIN_BOOT_BTN = 0;  // onboard BOOT button, works without wiring
@@ -24,14 +25,19 @@ const Note melody[] = {
 constexpr size_t MELODY_LEN = sizeof(melody) / sizeof(melody[0]);
 
 // Draw a cake frame, optionally with text over it
+// Offset to center 128×160 frames on the 240×320 screen
+constexpr int16_t CAKE_X = (240 - CAKE_W) / 2;  // 56
+constexpr int16_t CAKE_Y = (320 - CAKE_H) / 2;  // 80
+
 void drawCake(uint8_t frame, const char *text = nullptr, uint8_t textSize = 1, int16_t textY = 36) {
-    tft.pushImage(0, 0, CAKE_W, CAKE_H, CAKE_FRAMES[frame % CAKE_FRAME_COUNT]);
+    tft.fillScreen(TFT_BLACK);
+    tft.pushImage(CAKE_X, CAKE_Y, CAKE_W, CAKE_H, CAKE_FRAMES[frame % CAKE_FRAME_COUNT]);
     if (text) {
         tft.setFreeFont(&rainyhearts16px);
         tft.setTextColor(COLOR_DARK_PINK);  // no bg color -> transparent over image
         tft.setTextDatum(MC_DATUM);
         tft.setTextSize(textSize);
-        tft.drawString(text, 64, textY);
+        tft.drawString(text, 120, textY);
         tft.setTextSize(1);
         tft.setTextFont(1);
     }
@@ -50,6 +56,7 @@ void playMelody() {
 }
 
 // One expression per step: 3 -> smile, 2 -> excited, 1 -> wink, finale -> happy
+// Requires CAKE_FRAME_COUNT >= 4
 void countdown() {
     const char *nums[] = {"3", "2", "1"};
     for (uint8_t i = 0; i < 3; i++) {
@@ -60,15 +67,69 @@ void countdown() {
     drawCake(3, "happy birthday!");
 }
 
+bool connectWiFi() {
+    // SCREEN 1: Connecting — drawn before the blocking autoConnect() call
+    tft.fillScreen(TFT_NAVY);
+    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(2);
+    tft.drawString("Connecting...", 120, 160);
+    Serial.println("WiFi: connecting");
+
+    WiFiManager wm;
+    wm.setConfigPortalTimeout(WIFI_TIMEOUT_MS / 1000);  // seconds, not ms
+
+    // SCREEN 2: Portal active — drawn inside callback when AP comes up
+    wm.setAPCallback([](WiFiManager* myWM) {
+        tft.fillScreen(TFT_NAVY);
+        tft.setTextColor(TFT_WHITE, TFT_NAVY);
+        tft.setTextDatum(MC_DATUM);
+        tft.setTextFont(4);
+        tft.drawString("Setup WiFi:", 120, 130);
+        tft.setTextFont(2);  // reset — setTextFont is not sticky
+        tft.drawString(WIFI_AP_NAME, 120, 170);
+        tft.drawString("192.168.4.1", 120, 194);
+    });
+
+    bool ok = wm.autoConnect(WIFI_AP_NAME);
+
+    // Reinstate TFT state — WiFiManager's blocking loop leaves TFT_eSPI in an undefined state
+    tft.init();
+    tft.setRotation(2);
+    tft.setSwapBytes(true);
+
+    if (ok) {
+        // SCREEN 3: Connected
+        tft.fillScreen(TFT_NAVY);
+        tft.setTextColor(TFT_WHITE, TFT_NAVY);
+        tft.setTextDatum(MC_DATUM);
+        tft.setTextFont(2);
+        tft.drawString("WiFi connected!", 120, 160);
+        Serial.println("WiFi connected");
+        delay(1000);
+        return true;
+    } else {
+        // SCREEN 4: Offline mode (persistent; distinct dark-grey background)
+        tft.fillScreen(TFT_DARKGREY);
+        tft.setTextColor(TFT_WHITE, TFT_DARKGREY);
+        tft.setTextDatum(MC_DATUM);
+        tft.setTextFont(2);
+        tft.drawString("Offline mode", 120, 148);
+        tft.drawString("Press button to play", 120, 172);
+        Serial.println("WiFi offline - portal timed out");
+        return false;
+    }
+}
+
 void setup() {
     Serial.begin(115200);
 
     if (!LittleFS.begin(true)) {
-        Serial.println("LittleFS mount failed — restarting");
-        Serial.flush();
-        ESP.restart();
+        Serial.println("LittleFS mount failed — continuing without FS");
+        // Phase 9 (LittleFS playback) will fail gracefully; no restart loop
+    } else {
+        Serial.println("LittleFS mounted");
     }
-    Serial.println("LittleFS mounted");
     // Optional: Serial.printf("LittleFS: %u KB used / %u KB total\n",
     //     LittleFS.usedBytes() / 1024, LittleFS.totalBytes() / 1024);
 
@@ -77,14 +138,22 @@ void setup() {
     pinMode(PIN_BUZZER, OUTPUT);
 
     tft.init();
-    tft.setRotation(0);
+    tft.setRotation(2);
     tft.setSwapBytes(true);  // image data is big-endian RGB565
-    // Horizontal mirror: clear MADCTL MX bit. Rotation-0 BLACKTAB is
-    // MX|MY|BGR (0xC8); clearing MX -> MY (0x80). This clone also flips its
-    // subpixel order when mirrored, so use RGB (drop the 0x08 BGR bit).
-    tft.writecommand(0x36);  // MADCTL
-    tft.writedata(0x80);
-    drawCake(0);
+
+    bool wifiOk = connectWiFi();
+
+    if (wifiOk) {
+        // Sync clock before any HTTPS — mbedTLS validates cert notBefore/notAfter
+        // against system time, which is epoch-zero at cold boot without NTP.
+        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+        // Phase 7: manifest fetch + asset sync goes here
+        // if (wifiOk) { syncAssets(); }
+
+        drawCake(0);
+    }
+    // If !wifiOk: "Offline mode" screen persists; do NOT call drawCake(0)
 }
 
 void loop() {
