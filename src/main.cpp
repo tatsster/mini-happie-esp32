@@ -411,6 +411,10 @@ void loop() {
             for (JsonObject note : doc.as<JsonArray>()) {
                 uint16_t freq = note["freq"];
                 uint16_t ms   = note["ms"];
+                if (ms == 0) {  // guard malformed entries — delay(0) races through notes silently
+                    Serial.printf("[play] note with ms==0 skipped\n");
+                    continue;
+                }
                 if (freq > 0) {  // T-09-03: guard freq==0 rests (Pitfall 6)
                     tone(PIN_BUZZER, freq, ms);
                 }
