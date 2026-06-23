@@ -363,5 +363,67 @@ void setup() {
 }
 
 void loop() {
-    // Auto-play is driven from setup(). Nothing to poll.
+    // Step 1: Build frame list via sequential probe (D-07)
+    // Cap at MAX_FRAMES=32 to guard against corrupted FS causing unbounded probe (T-09-02)
+    char framePaths[MAX_FRAMES][28];
+    uint8_t frameCount = 0;
+    for (uint8_t i = 0; i < MAX_FRAMES; i++) {
+        char path[28];
+        snprintf(path, sizeof(path), "/frames/frame_%u.bin", i);
+        if (!LittleFS.exists(path)) break;
+        memcpy(framePaths[frameCount++], path, sizeof(path));
+    }
+
+    // Step 2: No assets — static error screen (D-06/D-11)
+    if (frameCount == 0) {
+        showSyncStatus("No content. Restart to retry.");
+        return;
+    }
+
+    // Step 3: Frame animation — 500ms fixed delay per frame (D-10, PLAY-01)
+    for (uint8_t i = 0; i < frameCount; i++) {
+        fs::File f = LittleFS.open(framePaths[i], FILE_READ);
+        if (f) {  // T-09-01: guard open failure (Pitfall 4)
+            int n = f.read((uint8_t*)frameBuf, sizeof(frameBuf));
+            f.close();  // close before delay — do not hold handle during 500ms (anti-pattern)
+            if (n == (int)sizeof(frameBuf)) {
+                tft.pushImage(FRAME_X, FRAME_Y, 128, 160, frameBuf);
+            } else {
+                // T-09-01: short read — skip this frame, never push partial buffer (Pitfall 2)
+                Serial.printf("[play] short read frame %u: %d bytes\n", i, n);
+            }
+        }
+        delay(500);  // D-10: delay() calls vTaskDelay internally — yields to FreeRTOS scheduler
+    }
+
+    // Step 4: Song playback — probe /songs/song_0.json only (D-08, PLAY-02)
+    fs::File sf = LittleFS.open("/songs/song_0.json", FILE_READ);
+    if (sf) {
+        JsonDocument doc;  // v7 API: heap-allocated elastically, no capacity template
+        DeserializationError err = deserializeJson(doc, sf);
+        sf.close();  // close before acting on data — do not hold handle during tone() (Pattern 2)
+        if (!err) {
+            for (JsonObject note : doc.as<JsonArray>()) {
+                uint16_t freq = note["freq"];
+                uint16_t ms   = note["ms"];
+                if (freq > 0) {  // T-09-03: guard freq==0 rests (Pitfall 6)
+                    tone(PIN_BUZZER, freq, ms);
+                }
+                delay(ms);
+                noTone(PIN_BUZZER);
+                delay(30);
+            }
+        } else {
+            Serial.printf("[play] song parse error: %s\n", err.c_str());
+        }
+    }
+    // If no song file → play silently (no-op) per D-08
+
+    // Step 5: Hot-reload check (D-09)
+    // Reset BEFORE returning so next loop() call re-probes the frame list (Pitfall 5)
+    if (g_assetsReady) {
+        g_assetsReady = false;
+        Serial.println("[play] new assets flagged — reloading on next cycle");
+    }
+    // return — Arduino calls loop() again automatically
 }
