@@ -377,6 +377,7 @@ void loop() {
     // Step 2: No assets — static error screen (D-06/D-11)
     if (frameCount == 0) {
         showSyncStatus("No content. Restart to retry.");
+        delay(5000);  // stable error screen — no loop-storm
         return;
     }
 
