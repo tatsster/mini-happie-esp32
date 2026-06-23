@@ -77,7 +77,12 @@ def get_frame_png(name: Annotated[str, FPath(pattern=r"^frame_\d+$")]) -> Respon
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Frame '{name}' not found")
     data = path.read_bytes()
-    return Response(content=data, media_type="image/png")
+    etag = f'"{hashlib.md5(data, usedforsecurity=False).hexdigest()}"'
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={"ETag": etag, "Cache-Control": "no-cache"},
+    )
 
 
 _ACCEPTED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/jpg"}

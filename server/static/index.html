@@ -470,7 +470,7 @@
         const resp = await fetch("/manifest.json");
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         const data = await resp.json();
-        renderFrameList(data.frames || []);
+        renderFrameList(data.frames || [], data.updated_at || "");
         renderSongList(data.songs || []);
       } catch (err) {
         console.warn("Could not refresh manifest:", err.message);
@@ -481,7 +481,7 @@
       while (el.firstChild) { el.removeChild(el.firstChild); }
     }
 
-    function renderFrameList(frames) {
+    function renderFrameList(frames, updatedAt) {
       clearChildren(frameList);
       frameList.className = "item-list";   // reset; grid class set below when items exist
 
@@ -528,7 +528,7 @@
 
         // Thumbnail — served by GET /frames/{name}.png (added in Phase 3)
         const thumb = document.createElement("img");
-        thumb.src = "/frames/" + name + ".png";
+        thumb.src = "/frames/" + name + ".png" + (updatedAt ? "?v=" + encodeURIComponent(updatedAt) : "");
         thumb.alt = name;
         thumb.className = "frame-thumb";
 
