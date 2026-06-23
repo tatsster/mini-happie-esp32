@@ -1,8 +1,6 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 
-#include "cake_frames.h"
-#include "rainyhearts_font.h"
 #include <FS.h>
 #include <LittleFS.h>
 #include "config.h"
@@ -15,59 +13,13 @@ constexpr uint8_t PIN_BUZZER = 25;
 
 TFT_eSPI tft = TFT_eSPI();
 
-constexpr uint16_t COLOR_DARK_PINK = 0x8909;  // #89204A, sampled from the cake outline
+// Frame buffer: 128×160 pixels × 2 bytes = 40,960 bytes — file scope (.bss), never stack
+static uint16_t frameBuf[128 * 160];
 
-struct Note { uint16_t freq; uint16_t ms; };
-const Note melody[] = {
-    {294, 250}, {294, 250}, {330, 500}, {294, 500}, {392, 500}, {370, 1000},
-    {294, 250}, {294, 250}, {330, 500}, {294, 500}, {440, 500}, {392, 1000},
-    {294, 250}, {294, 250}, {587, 500}, {494, 500}, {392, 500}, {370, 500}, {330, 1000},
-    {523, 250}, {523, 250}, {494, 500}, {392, 500}, {440, 500}, {392, 1000},
-};
-constexpr size_t MELODY_LEN = sizeof(melody) / sizeof(melody[0]);
-
-// Draw a cake frame, optionally with text over it
-// Offset to center 128×160 frames on the 240×320 screen
-constexpr int16_t CAKE_X = (240 - CAKE_W) / 2;  // 56
-constexpr int16_t CAKE_Y = (320 - CAKE_H) / 2;  // 80
-
-void drawCake(uint8_t frame, const char *text = nullptr, uint8_t textSize = 1, int16_t textY = 36) {
-    tft.fillScreen(TFT_BLACK);
-    tft.pushImage(CAKE_X, CAKE_Y, CAKE_W, CAKE_H, CAKE_FRAMES[frame % CAKE_FRAME_COUNT]);
-    if (text) {
-        tft.setFreeFont(&rainyhearts16px);
-        tft.setTextColor(COLOR_DARK_PINK);  // no bg color -> transparent over image
-        tft.setTextDatum(MC_DATUM);
-        tft.setTextSize(textSize);
-        tft.drawString(text, 120, textY);
-        tft.setTextSize(1);
-        tft.setTextFont(1);
-    }
-}
-
-// Buzzer plays the melody note by note
-void playMelody() {
-    for (size_t i = 0; i < MELODY_LEN; i++) {
-        if (melody[i].freq > 0) {
-            tone(PIN_BUZZER, melody[i].freq, melody[i].ms);
-        }
-        delay(melody[i].ms);
-        noTone(PIN_BUZZER);
-        delay(30);
-    }
-}
-
-// One expression per step: 3 -> smile, 2 -> excited, 1 -> wink, finale -> happy
-// Requires CAKE_FRAME_COUNT >= 4
-void countdown() {
-    const char *nums[] = {"3", "2", "1"};
-    for (uint8_t i = 0; i < 3; i++) {
-        drawCake(i, nums[i], 3, 36);  // 16px font x3 = chunky 48px digits
-        tone(PIN_BUZZER, 880, 80);
-        delay(700);
-    }
-    drawCake(3, "happy birthday!");
-}
+// Frame centering constants: center 128×160 on 240×320 display (D-03)
+constexpr int16_t FRAME_X = (240 - 128) / 2;  // 56
+constexpr int16_t FRAME_Y = (320 - 160) / 2;  // 80
+constexpr uint8_t MAX_FRAMES = 32;  // sequential-probe cap (D-07)
 
 enum SyncState { SYNC_IDLE, SYNC_CONNECTING, SYNC_DOWNLOADING, SYNC_DONE, SYNC_FAILED };
 volatile SyncState g_syncState = SYNC_IDLE;
@@ -294,7 +246,7 @@ void syncAssets(JsonArray frames, JsonArray songs) {
     }
 
     // Steps 5-7: signal completion (WR-03: log success/fail counts)
-    // g_assetsReady always set true: Phase 8 PROGMEM playback does not require LittleFS assets
+    // g_assetsReady always set true: main core plays from LittleFS after this flag is set
     g_assetsReady = true;
     g_syncState = SYNC_DONE;
     Serial.printf("[sync] done — assetsReady (downloaded %d, skipped/failed %d)\n", succeeded, failed);
@@ -389,10 +341,8 @@ void setup() {
     bool hasAssets = LittleFS.exists("/frames/frame_0.bin");
 
     if (hasAssets) {
-        // Assets cached — play from PROGMEM immediately; Phase 9 will use LittleFS
-        countdown();
-        playMelody();
-        drawCake(0);
+        // Assets cached — loop() plays from LittleFS immediately (OFFLINE-01/OFFLINE-02 fast path)
+        return;
     } else {
         // First boot: no cached assets — show status until sync completes or fails (D-07/D-10)
         while (!g_assetsReady) {
@@ -408,10 +358,7 @@ void setup() {
             }
             delay(200);  // poll every 200ms
         }
-        // Play from PROGMEM regardless of sync outcome (D-10 edge case handled above)
-        countdown();
-        playMelody();
-        drawCake(0);
+        // loop() handles all playback from here (D-04)
     }
 }
 
