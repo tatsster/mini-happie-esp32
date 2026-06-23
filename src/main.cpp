@@ -345,16 +345,20 @@ void setup() {
         return;
     } else {
         // First boot: no cached assets — show status until sync completes or fails (D-07/D-10)
+        SyncState lastRendered = SYNC_IDLE;  // redraw only on state transitions — avoids flicker
         while (!g_assetsReady) {
             SyncState state = g_syncState;
-            if (state == SYNC_CONNECTING || state == SYNC_IDLE) {
-                showSyncStatus("Connecting...");
-            } else if (state == SYNC_DOWNLOADING) {
-                showSyncStatus("Downloading...");
-            } else if (state == SYNC_FAILED) {
-                showSyncStatus("Sync failed");
-                delay(2000);
-                break;
+            if (state != lastRendered) {
+                lastRendered = state;
+                if (state == SYNC_CONNECTING || state == SYNC_IDLE) {
+                    showSyncStatus("Connecting...");
+                } else if (state == SYNC_DOWNLOADING) {
+                    showSyncStatus("Downloading...");
+                } else if (state == SYNC_FAILED) {
+                    showSyncStatus("Sync failed");
+                    delay(2000);
+                    break;
+                }
             }
             delay(200);  // poll every 200ms
         }
